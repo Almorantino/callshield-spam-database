@@ -27028,6 +27028,30 @@
       "prefix_official": true,
       "scam_flag": false,
       "source_confidence": 0.4
+    },
+    {
+      "number": "0162990001",
+      "category": "energy",
+      "reports": 6,
+      "last_seen_days": 1,
+      "prefix_official": true,
+      "scam_flag": false,
+      "source_confidence": 0.8,
+      "source": [
+        "community-reports"
+      ]
+    },
+    {
+      "number": "0948990001",
+      "category": "fraud",
+      "reports": 14,
+      "last_seen_days": 0,
+      "prefix_official": true,
+      "scam_flag": true,
+      "source_confidence": 0.95,
+      "source": [
+        "community-reports"
+      ]
     }
   ]
 }

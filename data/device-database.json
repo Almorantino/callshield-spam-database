@@ -1,13 +1,18 @@
 {
   "version": "1.0",
-  "generated_at": "2026-03-10T20:50:41Z",
-  "total_scored": 3003,
+  "generated_at": "2026-03-10T20:58:57Z",
+  "total_scored": 3005,
   "blocked_numbers": [
-    "0948567812"
+    "0948567812",
+    "0948990001"
   ],
   "identified_numbers": [
     {
       "number": "0162806435",
+      "label": "Démarchage énergie"
+    },
+    {
+      "number": "0162990001",
       "label": "Démarchage énergie"
     },
     {
