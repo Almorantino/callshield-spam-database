@@ -16,6 +16,11 @@ def run_step(name, command):
 def main():
 
     run_step(
+        "Import external sources",
+        "python3 scripts/import_sources.py"
+    )
+
+    run_step(
         "Generate numbers from prefixes",
         "python3 scripts/generate_numbers_from_prefix.py"
     )

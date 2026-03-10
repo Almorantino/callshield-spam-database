@@ -1,0 +1,12 @@
+{
+  "feeds": [
+    {
+      "name": "sample-feed-1",
+      "url": "https://example.com/feed1.json"
+    },
+    {
+      "name": "sample-feed-2",
+      "url": "https://example.com/feed2.json"
+    }
+  ]
+}
