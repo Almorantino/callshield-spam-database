@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "last_updated": "2026-03-10",
+  "blocked_numbers": [
+    "0162806435",
+    "0948567812"
+  ],
+  "identified_numbers": [
+    {
+      "number": "0377994321",
+      "label": "Démarchage BTP"
+    }
+  ]
+}

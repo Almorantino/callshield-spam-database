@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "last_updated": "2026-03-10",
+  "numbers": [
+    {
+      "number": "0162806435",
+      "category": "energie",
+      "reports": 18,
+      "last_seen_days": 2,
+      "prefix_official": true,
+      "scam_flag": false,
+      "source_confidence": 0.9
+    },
+    {
+      "number": "0948567812",
+      "category": "fraud",
+      "reports": 31,
+      "last_seen_days": 1,
+      "prefix_official": true,
+      "scam_flag": true,
+      "source_confidence": 0.95
+    },
+    {
+      "number": "0377994321",
+      "category": "btp",
+      "reports": 4,
+      "last_seen_days": 10,
+      "prefix_official": true,
+      "scam_flag": false,
+      "source_confidence": 0.7
+    }
+  ]
+}

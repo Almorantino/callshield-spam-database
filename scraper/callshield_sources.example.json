@@ -1,0 +1,27 @@
+[
+  {
+    "url": "https://www.signal-arnaques.com/?q=telephone",
+    "kind": "blocked",
+    "label": "Arnaque"
+  },
+  {
+    "url": "https://www.signal-arnaques.com/?q=d%C3%A9marchage",
+    "kind": "identified",
+    "label": "Démarchage"
+  },
+  {
+    "url": "https://www.signal-arnaques.com/?q=cpf",
+    "kind": "blocked",
+    "label": "Arnaque CPF"
+  },
+  {
+    "url": "https://www.signal-arnaques.com/?q=colis",
+    "kind": "blocked",
+    "label": "Arnaque colis"
+  },
+  {
+    "url": "https://www.signal-arnaques.com/?q=energie",
+    "kind": "identified",
+    "label": "Démarchage énergie"
+  }
+]
