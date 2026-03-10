@@ -36,6 +36,11 @@ def main():
     )
 
     run_step(
+        "Purge stale numbers",
+        "python3 scripts/purge_stale_numbers.py"
+    )
+
+    run_step(
         "Refresh cluster analysis",
         "python3 scripts/analyze_number_clusters.py"
     )
