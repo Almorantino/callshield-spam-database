@@ -1,37 +1,29 @@
 {
-  "version": 2,
+  "version": 3,
   "last_updated": "2026-03-10",
+
   "blocked_numbers": [
     "0162806435",
-    "0948567812",
-    "0270123456"
+    "0948567812"
   ],
+
   "identified_numbers": [
     {
       "number": "0162123456",
-      "label": "Démarchage"
+      "label": "Démarchage énergie"
     },
     {
       "number": "0377994321",
-      "label": "Énergie"
-    },
-    {
-      "number": "0425123456",
-      "label": "BTP"
+      "label": "Rénovation / BTP"
     }
   ],
-  "telemarketing_prefixes": [
+
+  "blocked_prefixes": [
     "0162",
-    "0163",
     "0270",
-    "0271",
     "0377",
-    "0378",
     "0424",
-    "0425",
     "0568",
-    "0569",
-    "0948",
-    "0949"
+    "0948"
   ]
 }
