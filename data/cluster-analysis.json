@@ -1,0 +1,26 @@
+[
+  {
+    "prefix": "0948",
+    "total_numbers": 1001,
+    "block": 1,
+    "identify": 0,
+    "ignore": 1000,
+    "cluster_risk_score": 5
+  },
+  {
+    "prefix": "0162",
+    "total_numbers": 1001,
+    "block": 0,
+    "identify": 1,
+    "ignore": 1000,
+    "cluster_risk_score": 2
+  },
+  {
+    "prefix": "0377",
+    "total_numbers": 1001,
+    "block": 0,
+    "identify": 1,
+    "ignore": 1000,
+    "cluster_risk_score": 2
+  }
+]
