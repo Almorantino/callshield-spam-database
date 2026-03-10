@@ -8,7 +8,7 @@ SOURCE_FILE = BASE_DIR / "data" / "raw-source-database.json"
 SCORED_FILE = BASE_DIR / "data" / "scored-database.json"
 DEVICE_FILE = BASE_DIR / "data" / "device-database.json"
 OUTPUT_FILE = BASE_DIR / "output" / "spam-database.json"
-
+CLUSTER_FILE = BASE_DIR / "data" / "cluster-analysis.json"
 
 CATEGORY_LABELS = {
     "fraud": "Arnaque probable",
@@ -32,6 +32,36 @@ SOURCE_CONFIDENCE_MAP = {
     "unknown": 0.50,
 }
 
+def load_cluster_scores() -> dict:
+    if not CLUSTER_FILE.exists():
+        return {}
+
+    with CLUSTER_FILE.open("r", encoding="utf-8") as f:
+        cluster_data = json.load(f)
+
+    scores = {}
+
+    for entry in cluster_data:
+        prefix = str(entry.get("prefix", "")).strip()
+        risk_score = int(entry.get("cluster_risk_score", 0) or 0)
+
+        if prefix:
+            scores[prefix] = risk_score
+
+    return scores
+
+
+def cluster_bonus_for(number: str, cluster_scores: dict) -> int:
+    prefix = number[:4]
+    risk_score = cluster_scores.get(prefix, 0)
+
+    if risk_score >= 20:
+        return 10
+    if risk_score >= 10:
+        return 5
+    if risk_score >= 5:
+        return 2
+    return 0
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -177,7 +207,7 @@ def action_for(score: int) -> str:
     return "ignore"
 
 
-def build_scored_entry(raw: dict):
+def build_scored_entry(raw: dict, cluster_scores: dict):
     number = normalize_digits(raw.get("number", ""))
     if not number:
         return None
@@ -196,6 +226,9 @@ def build_scored_entry(raw: dict):
         category=category,
         sources_count=len(sources),
     )
+
+    bonus = cluster_bonus_for(number, cluster_scores)
+    score = min(100, score + bonus)
 
     return {
         "number": number,
@@ -217,9 +250,9 @@ def build_scored_entry(raw: dict):
 def build_scored_database(source: dict) -> dict:
     seen = set()
     numbers = []
-
+    cluster_scores = load_cluster_scores()
     for raw in source.get("numbers", []):
-        entry = build_scored_entry(raw)
+        entry = build_scored_entry(raw, cluster_scores)
         if not entry:
             continue
 
