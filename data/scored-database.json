@@ -1,33 +1,58 @@
 {
-  "version": 1,
-  "last_updated": "2026-03-10",
+  "version": "1.0",
+  "generated_at": "2026-03-10T18:50:07Z",
+  "total_numbers": 3,
   "numbers": [
     {
-      "number": "0162806435",
-      "category": "energie",
-      "reports": 18,
-      "last_seen_days": 2,
+      "number": "0948567812",
+      "normalized_e164": "+33948567812",
+      "country": "FR",
+      "category": "fraud",
+      "label": "Arnaque probable",
+      "reports": 31,
+      "scam_flag": true,
       "prefix_official": true,
-      "scam_flag": false,
-      "source_confidence": 0.9
+      "source": [
+        "official_prefix"
+      ],
+      "source_confidence": 0.95,
+      "last_seen": "2026-03-10",
+      "score": 100,
+      "action": "block"
     },
     {
-      "number": "0948567812",
-      "category": "fraud",
-      "reports": 31,
-      "last_seen_days": 1,
+      "number": "0162806435",
+      "normalized_e164": "+33162806435",
+      "country": "FR",
+      "category": "energy",
+      "label": "Démarchage énergie",
+      "reports": 18,
+      "scam_flag": false,
       "prefix_official": true,
-      "scam_flag": true,
-      "source_confidence": 0.95
+      "source": [
+        "official_prefix"
+      ],
+      "source_confidence": 0.9,
+      "last_seen": "2026-03-10",
+      "score": 63,
+      "action": "identify"
     },
     {
       "number": "0377994321",
+      "normalized_e164": "+33377994321",
+      "country": "FR",
       "category": "btp",
+      "label": "Démarchage BTP",
       "reports": 4,
-      "last_seen_days": 10,
-      "prefix_official": true,
       "scam_flag": false,
-      "source_confidence": 0.7
+      "prefix_official": true,
+      "source": [
+        "official_prefix"
+      ],
+      "source_confidence": 0.7,
+      "last_seen": "2026-03-10",
+      "score": 39,
+      "action": "identify"
     }
   ]
 }

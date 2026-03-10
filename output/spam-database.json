@@ -1,11 +1,15 @@
 {
-  "version": 1,
-  "last_updated": "2026-03-10",
+  "version": "1.0",
+  "generated_at": "2026-03-10T18:50:07Z",
+  "total_scored": 3,
   "blocked_numbers": [
-    "0162806435",
     "0948567812"
   ],
   "identified_numbers": [
+    {
+      "number": "0162806435",
+      "label": "Démarchage énergie"
+    },
     {
       "number": "0377994321",
       "label": "Démarchage BTP"
