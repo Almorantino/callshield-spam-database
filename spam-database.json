@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-03-11T17:20:47Z",
-  "total_scored": 96938,
+  "generated_at": "2026-03-11T17:29:36Z",
+  "total_scored": 96988,
   "blocked_numbers": [
     33612345678,
     33948990001,
@@ -39,6 +39,10 @@
     },
     {
       "number": 33377000885,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33948000505,
       "label": "Inconnu"
     },
     {
@@ -80003,10 +80007,6 @@
     },
     {
       "number": 9485629985,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629986,
       "label": "Arnaque probable"
     }
   ]
