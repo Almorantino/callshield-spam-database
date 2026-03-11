@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-03-11T16:39:09Z",
-  "total_scored": 95276,
+  "generated_at": "2026-03-11T16:50:52Z",
+  "total_scored": 96392,
   "blocked_numbers": [
     33612345678,
     33948990001,
@@ -38,7 +38,19 @@
       "label": "Inconnu"
     },
     {
+      "number": 33948000511,
+      "label": "Inconnu"
+    },
+    {
       "number": 33948000640,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33948000659,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33948000887,
       "label": "Inconnu"
     },
     {
@@ -79995,18 +80007,6 @@
     },
     {
       "number": 9485629987,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629988,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629989,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629990,
       "label": "Arnaque probable"
     }
   ]
