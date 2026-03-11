@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-03-11T16:23:25Z",
-  "total_scored": 94987,
+  "generated_at": "2026-03-11T16:39:09Z",
+  "total_scored": 95276,
   "blocked_numbers": [
     33612345678,
     33948990001,
@@ -9,6 +9,38 @@
     33162990001
   ],
   "identified_numbers": [
+    {
+      "number": 33163880001,
+      "label": "Démarchage assurance"
+    },
+    {
+      "number": 33162000054,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33377000017,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33377000020,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33377000021,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33377000205,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33377000615,
+      "label": "Inconnu"
+    },
+    {
+      "number": 33948000640,
+      "label": "Inconnu"
+    },
     {
       "number": 33948567812,
       "label": "Arnaque probable"
@@ -79975,38 +80007,6 @@
     },
     {
       "number": 9485629990,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629991,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629992,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629993,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629994,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629995,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629996,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629997,
-      "label": "Arnaque probable"
-    },
-    {
-      "number": 9485629998,
       "label": "Arnaque probable"
     }
   ]
