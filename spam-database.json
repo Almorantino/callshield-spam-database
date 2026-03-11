@@ -1,8 +1,9 @@
 {
   "version": 1,
-  "generated_at": "2026-03-11T10:05:53Z",
-  "total_scored": 93004,
+  "generated_at": "2026-03-11T10:40:13Z",
+  "total_scored": 93005,
   "blocked_numbers": [
+    33612345678,
     33948990001,
     33949770001,
     33162990001
