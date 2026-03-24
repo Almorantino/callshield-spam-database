@@ -1,6 +1,8 @@
 {
   "version": 999,
   "generated_at": "2026-03-24T15:30:00Z",
-  "blocked": [33677788899],
-  "identified": []
+  "total_scored": 1,
+  "max_callkit_blocks": 1,
+  "blocked_numbers": [33677788899],
+  "identified_numbers": []
 }
