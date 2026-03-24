@@ -1,8 +1,1 @@
-{
-  "version": 999,
-  "generated_at": "2026-03-24T15:30:00Z",
-  "total_scored": 1,
-  "max_callkit_blocks": 1,
-  "blocked_numbers": [33677788899],
-  "identified_numbers": []
-}
+{"version":2,"generated_at":"2026-03-24T17:00:04.591665+00:00_v2","total_scored":3,"max_callkit_blocks":1500000,"blocked_numbers":[33948990001],"identified_numbers":[{"number":33162990001,"label":"Spam suspect"}],"blocked_numbers_count":1,"identified_numbers_count":1,"incremental_mode":false,"incremental_reason":"full_rebuild","delta":{"added_blocks":1,"removed_blocks":0,"added_identify":1,"removed_identify":0}}
