@@ -1,8 +1,9 @@
 {
   "version": 1,
-  "generated_at": "2026-03-25T10:58:33.629569+00:00",
+  "generated_at": "2026-03-25T11:20:25.978135+00:00",
   "blocked_numbers_count": 45000,
   "identified_numbers_count": 4596,
+  "total_scored": 49596,
   "callkit_cap": 50000,
   "max_callkit_blocks": 50000,
   "blocked_numbers": [
