@@ -1,6 +1,9 @@
 {
   "version": 1,
   "generated_at": "auto",
+  "blocked_numbers_count": 45000,
+  "identified_numbers_count": 4596,
+  "callkit_cap": 50000,
   "blocked_numbers": [
     "33270200000",
     "33270200001",
