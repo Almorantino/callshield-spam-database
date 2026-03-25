@@ -1,0 +1,3 @@
+number_e164,label,category,confidence,risk_level,source,updated_at
+33948567812,Fraude probable,fraud,0.99,95,pipeline_v2,
+33948990001,Fraude probable,fraud,0.99,95,pipeline_v2,
