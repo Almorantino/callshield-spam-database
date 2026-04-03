@@ -99977,8 +99977,8 @@ number_e164,label,category,confidence,risk_level,source,updated_at
 33424201241,Fraude probable,fraud,0.99,95,pipeline_v2,2026-03-15
 33424201242,Fraude probable,fraud,0.99,95,pipeline_v2,2026-03-15
 33424201243,Fraude probable,fraud,0.99,95,pipeline_v2,2026-03-15
-33424201244,Fraude probable,fraud,0.99,95,pipeline_v2,2026-03-15
 33611111111,Fraude probable,fraud,0.9,95,pipeline_v2,
+33612345678,Fraude probable,fraud,0.9,95,pipeline_v2,
 33662000020,Fraude probable,fraud,0.9,95,pipeline_v2,
 33662000021,Fraude probable,fraud,0.9,95,pipeline_v2,
 33679001001,Fraude probable,fraud,0.9,95,pipeline_v2,
