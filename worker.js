@@ -1187,8 +1187,35 @@ async function analyzeCampaignPattern(env, normalizedMessage) {
   }
 }
 
-async function callOpenAI(env, message, number) {
+function compactAIAnalysisContext(context = null) {
+  if (!context || typeof context !== "object" || Array.isArray(context)) return null
+
+  const signals = context.signals && typeof context.signals === "object" && !Array.isArray(context.signals)
+    ? context.signals
+    : {}
+
+  return {
+    heuristic_score: clampScore(context.heuristic_score),
+    reason_codes: uniqueReasonCodes(Array.isArray(context.reason_codes) ? context.reason_codes : []).slice(0, 20),
+    domains: uniqueReasonCodes(Array.isArray(context.domains) ? context.domains.map(normalizeDomainValue).filter(Boolean) : []).slice(0, 10),
+    trusted_domains: uniqueReasonCodes(Array.isArray(context.trusted_domains) ? context.trusted_domains.map(normalizeDomainValue).filter(Boolean) : []).slice(0, 10),
+    trust_level: String(context.trust_level || "low").trim().toLowerCase() || "low",
+    signals: {
+      has_url: Boolean(signals.has_url),
+      has_urgency: Boolean(signals.has_urgency),
+      has_shortener: Boolean(signals.has_shortener),
+      has_spoof: Boolean(signals.has_spoof),
+      has_identity: Boolean(signals.has_identity),
+      has_account_threat: Boolean(signals.has_account_threat),
+      has_telemarketing: Boolean(signals.has_telemarketing),
+    },
+  }
+}
+
+async function callOpenAI(env, message, number, analysisContext = null) {
   if (!env.OPENAI_API_KEY) return null
+
+  const context = compactAIAnalysisContext(analysisContext)
 
   try {
     const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
@@ -1226,6 +1253,9 @@ async function callOpenAI(env, message, number) {
                   "- fraud = phishing ou usurpation",
                   "- spam = contenu indésirable",
                   "- telemarketing = démarchage",
+                  "- utilise context comme signaux Worker, pas comme vérité absolue",
+                  "- ne classe safe avec DELIVERY_SCAM, PAYMENT_PRESSURE, ACCOUNT_THREAT ou PHISHING_INTENT que si le SMS est clairement bénin",
+                  "- si domaine trusted et aucun signal critique, tends vers safe",
                 ].join("\n"),
               },
             ],
@@ -1238,6 +1268,7 @@ async function callOpenAI(env, message, number) {
                 text: JSON.stringify({
                   message,
                   number: number || "",
+                  context,
                 }),
               },
             ],
@@ -2866,7 +2897,23 @@ async function handleSMSAnalyze(env, body) {
   }
 
   try {
-    const aiResult = await callOpenAI(env, message, number)
+    const aiAnalysisContext = {
+      heuristic_score: enrichedHeuristicScore,
+      reason_codes: combinedReasons,
+      domains: baseDomains,
+      trusted_domains: baseDomains.filter((domain) => isDomainTrusted(domain, baseTrustContext)),
+      trust_level: baseTrustContext?.trustLevel || "low",
+      signals: {
+        has_url: baseHasUrl,
+        has_urgency: baseHasUrgency,
+        has_shortener: baseHasShortener,
+        has_spoof: baseDomainsTrusted ? false : messageSpoof,
+        has_identity: baseHasIdentity,
+        has_account_threat: baseHasAccountThreat,
+        has_telemarketing: baseHasTelemarketing,
+      },
+    }
+    const aiResult = await callOpenAI(env, message, number, aiAnalysisContext)
 
     const rawResult = await buildFinalAnalysis(env, {
       heuristicScore: enrichedHeuristicScore,
