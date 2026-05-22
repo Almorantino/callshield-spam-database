@@ -100,7 +100,11 @@ function actionFromScore(score, category = "unknown") {
   }
 
   if (category === "telemarketing") {
-    return score >= 50 ? "warn" : "allow"
+    return score >= 35 ? "warn" : "allow"
+  }
+
+  if (category === "unknown") {
+    return score >= 35 ? "warn" : "allow"
   }
 
   return "allow"
@@ -1853,6 +1857,8 @@ async function buildFinalAnalysis(env, {
     }
   } else if (finalScore >= 35 && reason_codes.includes("TELEMARKETING_PATTERN")) {
     category = "telemarketing"
+  } else if (finalScore >= 35 && (category === "safe" || category === "unknown")) {
+    category = "unknown"
   } else if (category === "unknown") {
     category = "safe"
   }
