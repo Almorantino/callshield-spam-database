@@ -1,10 +1,31 @@
 const JSON_HEADERS = { "Content-Type": "application/json" }
 const EXTERNAL_FETCH_TIMEOUT_MS = 1500
 const OPENAI_FETCH_TIMEOUT_MS = 2500
+const APPLE_APP_SITE_ASSOCIATION = {
+  messagefilter: {
+    apps: [
+      "65CU34K4S6.com.almorantino.callshield",
+      "65CU34K4S6.com.almorantino.callshield.CallShieldMessageFilter",
+    ],
+  },
+  classificationreport: {
+    apps: [
+      "65CU34K4S6.com.almorantino.callshield",
+      "65CU34K4S6.com.almorantino.callshield.CallShieldReportingExtension",
+    ],
+  },
+}
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
+    headers: JSON_HEADERS,
+  })
+}
+
+function appleAppSiteAssociationResponse() {
+  return new Response(JSON.stringify(APPLE_APP_SITE_ASSOCIATION), {
+    status: 200,
     headers: JSON_HEADERS,
   })
 }
@@ -203,7 +224,9 @@ function containsSpoofing(text, domains = [], domainsTrustedInput = null) {
 }
 
 function containsOTP(text) {
-  return /\b(code|otp|validation|vérification|verification|sécurité|securite)\b/i.test(text)
+  const value = String(text || "")
+  return /\b(code|otp)\b/i.test(value) ||
+    (/\b(validation|vérification|verification|sécurité|securite)\b/i.test(value) && /\b\d{4,8}\b/.test(value))
 }
 
 function containsSuspiciousPattern(text) {
@@ -851,8 +874,22 @@ function collectMessageDomains(text) {
 }
 
 function hasIdentityRequest(text) {
-  return /\b(confirmez?|validez?|v[ée]rifiez?|mettez?\s+[àa]\s+jour|renseignez|compl[ée]tez)\b/i.test(text)
+  return /\b(confirmez?|validez?|v[ée]rifiez?|v[ée]rifi[ée]e|verifiee|mettez?\s+[àa]\s+jour|mise\s+[àa]\s+jour|renseignez|compl[ée]tez|compl[ée]t[ée]e|completee|requise?|doit\s+[eê]tre|doit\s+etre)\b/i.test(text)
     && /\b(informations?|identit[ée]|compte|profil|acc[eè]s|coordonn[ée]es|paiement|iban|cb|carte bancaire|mot de passe|password|identifiant|login)\b/i.test(text)
+}
+
+function requiresAIReviewForLowScore(message, reasonCodes = []) {
+  const reasons = Array.isArray(reasonCodes) ? reasonCodes : []
+  return hasIdentityRequest(message) ||
+    hasAccountThreat(message) ||
+    reasons.some((code) => [
+      "DELIVERY_SCAM",
+      "PAYMENT_PRESSURE",
+      "ACCOUNT_THREAT",
+      "PHISHING_INTENT",
+      "FAKE_AUTHORITY",
+      "JOB_SCAM",
+    ].includes(code))
 }
 
 function hasAccountThreat(text) {
@@ -1212,6 +1249,62 @@ function compactAIAnalysisContext(context = null) {
   }
 }
 
+const AI_FRAUD_REASON_CODES = new Set([
+  "OTP_SCAM",
+  "BRAND_SPOOF",
+  "PHISHING_INTENT",
+  "PAYMENT_PRESSURE",
+  "ACCOUNT_THREAT",
+  "FAKE_AUTHORITY",
+  "FAKE_TRACKING_LINK",
+  "JOB_SCAM",
+  "KNOWN_MALICIOUS_DOMAIN",
+  "RISKY_TLD",
+  "SUSPICIOUS_DOMAIN",
+  "IP_URL",
+])
+
+function hasAIFraudReason(reasonCodes = []) {
+  return Array.isArray(reasonCodes) && reasonCodes.some((code) => AI_FRAUD_REASON_CODES.has(code))
+}
+
+function normalizeOpenAIAnalysisResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+
+  const reason_codes = uniqueReasonCodes(Array.isArray(value.reason_codes) ? value.reason_codes : [])
+  const hasFraudReason = hasAIFraudReason(reason_codes)
+  const hasTelemarketingReason = reason_codes.includes("TELEMARKETING_PATTERN")
+  const scamFlag = value.is_scam === true
+  let score = clampScore(value.score)
+  let category = canonicalCategory(value.category)
+
+  if (category === "safe" || category === "unknown") {
+    if (hasTelemarketingReason && !hasFraudReason) {
+      category = "telemarketing"
+    } else if (scamFlag || hasFraudReason) {
+      category = "fraud"
+    } else if (score >= 70) {
+      category = "spam"
+    }
+  }
+
+  if (category === "fraud") {
+    score = Math.max(score, 50)
+  } else if (category === "spam") {
+    score = Math.max(score, 50)
+  } else if (category === "telemarketing") {
+    score = Math.max(score, 35)
+  }
+
+  return {
+    is_scam: category === "fraud" || (category === "spam" && score >= 50),
+    score,
+    category,
+    reason_codes,
+    explanation: String(value.explanation || "").slice(0, 300),
+  }
+}
+
 async function callOpenAI(env, message, number, analysisContext = null) {
   if (!env.OPENAI_API_KEY) return null
 
@@ -1313,13 +1406,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
         const contents = Array.isArray(item?.content) ? item.content : []
         for (const c of contents) {
           if (c?.json && typeof c.json === "object" && !Array.isArray(c.json)) {
-            return {
-              is_scam: Boolean(c.json.is_scam),
-              score: clampScore(c.json.score),
-              category: canonicalCategory(c.json.category),
-              reason_codes: uniqueReasonCodes(Array.isArray(c.json.reason_codes) ? c.json.reason_codes : []),
-              explanation: String(c.json.explanation || "").slice(0, 300),
-            }
+            return normalizeOpenAIAnalysisResult(c.json)
           }
           const text = typeof c?.text === "string" ? c.text.trim() : ""
           if (text) {
@@ -1335,13 +1422,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
 
-    return {
-      is_scam: Boolean(parsed.is_scam),
-      score: clampScore(parsed.score),
-      category: canonicalCategory(parsed.category),
-      reason_codes: uniqueReasonCodes(Array.isArray(parsed.reason_codes) ? parsed.reason_codes : []),
-      explanation: String(parsed.explanation || "").slice(0, 300),
-    }
+    return normalizeOpenAIAnalysisResult(parsed)
   } catch {
     return null
   }
@@ -1539,7 +1620,7 @@ async function buildFinalAnalysis(env, {
   precomputedTrustContext = null,
 }) {
   const aiScore = aiResult ? clampScore(aiResult.score) : null
-  const aiReasons = aiResult?.reason_codes || []
+  const aiReasons = Array.isArray(aiResult?.reason_codes) ? aiResult.reason_codes : []
 
   const allowedReasonCodes = new Set([
     "URL",
@@ -1626,6 +1707,13 @@ async function buildFinalAnalysis(env, {
   const hasKnownFraud = reason_codes_raw.includes("KNOWN_FRAUD_NUMBER")
   const hasKnownSpamNumber = reason_codes_raw.includes("KNOWN_SPAM_NUMBER")
   const hasGlobalScam = reason_codes_raw.includes("GLOBAL_SCAM_DETECTED")
+  const aiCategory = aiResult?.category
+    ? canonicalCategory(aiResult.category)
+    : "unknown"
+  const aiIndicatesRisk =
+    aiResult?.is_scam === true ||
+    (aiScore !== null && aiScore >= 50 && ["fraud", "spam", "telemarketing"].includes(aiCategory)) ||
+    hasAIFraudReason(aiReasons)
 
   const hasCriticalFraudSignal =
     hasKnownFraud ||
@@ -1689,7 +1777,9 @@ async function buildFinalAnalysis(env, {
     if (heuristicScore >= 90) {
       finalScore = heuristicScore
     } else if (heuristicScore <= 15) {
-      finalScore = heuristicScore
+      finalScore = aiIndicatesRisk && (!domainsTrusted || hasCriticalFraudSignal)
+        ? clampScore((aiScore * 0.65) + (heuristicScore * 0.35))
+        : Math.min(finalScore, heuristicScore)
     } else {
       finalScore = clampScore((aiScore * 0.65) + (heuristicScore * 0.35))
     }
@@ -1745,9 +1835,7 @@ async function buildFinalAnalysis(env, {
 
   finalScore = clampScore(finalScore)
 
-  let category = aiResult?.category
-    ? canonicalCategory(aiResult.category)
-    : "unknown"
+  let category = aiCategory
 
   if (trustedTransactional && !hasCriticalFraudSignal) {
     category = "safe"
@@ -1755,6 +1843,8 @@ async function buildFinalAnalysis(env, {
     category = "telemarketing"
   } else if (hasKnownSpamNumber && !hasCriticalFraudSignal) {
     category = "spam"
+  } else if (domainsTrusted && !hasCriticalFraudSignal && finalScore <= 15) {
+    category = "safe"
   } else if (finalScore >= 70) {
     category = "fraud"
   } else if (finalScore >= 50) {
@@ -2492,7 +2582,7 @@ async function fastHeuristicDecision(env, message, precomputedHeuristic = null, 
   const score = heuristic.score
   const reasons = heuristic.reasonCodes
 
-  if (score <= 15) {
+  if (score <= 15 && !requiresAIReviewForLowScore(message, reasons)) {
     const result = await buildFinalAnalysis(env, {
       heuristicScore: score,
       heuristicReasons: reasons,
@@ -2784,7 +2874,7 @@ async function handleSMSAnalyze(env, body) {
   ]
 
 
-  if (enrichedHeuristicScore <= 35) {
+  if (enrichedHeuristicScore <= 35 && !requiresAIReviewForLowScore(message, combinedReasons)) {
     const rawResult = await buildFinalAnalysis(env, {
       heuristicScore: enrichedHeuristicScore,
       heuristicReasons: combinedReasons,
@@ -3173,6 +3263,10 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url)
+
+      if (request.method === "GET" && url.pathname === "/.well-known/apple-app-site-association") {
+        return appleAppSiteAssociationResponse()
+      }
 
       if (request.method === "POST" && url.pathname === "/live-caller-id/lookup") {
         const body = await request.json().catch(() => null)
