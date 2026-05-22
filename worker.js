@@ -74,8 +74,12 @@ function actionFromScore(score, category = "unknown") {
     return "block"
   }
 
-  if (category === "spam" || category === "telemarketing") {
+  if (category === "spam") {
     return "warn"
+  }
+
+  if (category === "telemarketing") {
+    return score >= 50 ? "warn" : "allow"
   }
 
   return "allow"
@@ -1328,15 +1332,17 @@ function buildCanonicalAnalysis({
   modelVersion,
   trustContext = null,
   precomputedDomains = null,
+  precomputedTrustContext = null,
 }) {
   const rawText = String(sourceMessage || "")
   const normalizedText = rawText.toLowerCase()
 
   const urls = extractUrls(rawText)
   const domains = precomputedDomains || collectMessageDomains(rawText)
+  const effectiveTrustContext = trustContext || precomputedTrustContext
 
-  const trustedDomains = domains.filter((domain) => isDomainTrusted(domain, trustContext))
-  const domainsTrusted = areDomainsTrusted(domains, trustContext)
+  const trustedDomains = domains.filter((domain) => isDomainTrusted(domain, effectiveTrustContext))
+  const domainsTrusted = areDomainsTrusted(domains, effectiveTrustContext)
 
   const hasFraudTrustSignal =
     category === "fraud" ||
@@ -1348,10 +1354,10 @@ function buildCanonicalAnalysis({
 
   const trustScore = hasFraudTrustSignal
     ? 0
-    : (Number(trustContext?.maxTrustScore || 0) || (trustedDomains.length > 0 ? 100 : 0))
+    : (Number(effectiveTrustContext?.maxTrustScore || 0) || (trustedDomains.length > 0 ? 100 : 0))
   const trustLevel = hasFraudTrustSignal
     ? "low"
-    : (trustContext?.trustLevel || (trustedDomains.length > 0 ? "high" : "low"))
+    : (effectiveTrustContext?.trustLevel || (trustedDomains.length > 0 ? "high" : "low"))
   const numericDensity = (rawText.match(/\d/g) || []).length
 
   // Cache repeated signal checks
@@ -1404,7 +1410,7 @@ function buildCanonicalAnalysis({
 
     trust: {
       domain_score: trustScore,
-      brand_score: trustContext?.brandKeys?.length ? 100 : 0,
+      brand_score: effectiveTrustContext?.brandKeys?.length ? 100 : 0,
       sender_score: 0,
       number_score: 0,
       global_trust_score: trustScore,
@@ -2566,7 +2572,7 @@ async function handleSMSAnalyze(env, body) {
       aiScore: null,
       finalScore: telemarketingHeuristicScore,
       category: "telemarketing",
-      action: "warn",
+      action: actionFromScore(telemarketingHeuristicScore, "telemarketing"),
       confidence: confidenceFromScore(telemarketingHeuristicScore),
       riskLevel: riskLevelFromScore(telemarketingHeuristicScore),
       decisionSource: "heuristic_telemarketing_fast",
