@@ -1175,23 +1175,30 @@ async function fallbackFeedback(env, number) {
 }
 
 async function fallbackReports(env, number) {
-  const row = await env.DB.prepare(`
-    SELECT category
-    FROM sms_reports
-    WHERE number_e164 = ?1
-    ORDER BY created_at DESC
-    LIMIT 1
-  `)
-    .bind(number)
-    .first()
+  try {
+    const smsReportColumns = await getTableColumns(env, "sms_reports")
+    if (!smsReportColumns.has("category")) return null
 
-  if (!row) return null
+    const row = await env.DB.prepare(`
+      SELECT category
+      FROM sms_reports
+      WHERE number_e164 = ?1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+      .bind(number)
+      .first()
 
-  const category = canonicalCategory(row.category)
+    if (!row) return null
 
-  if (category === "fraud") return buildResponse("Fraude probable", "fraud", 0.9)
-  if (category === "spam") return buildResponse("Spam probable", "spam", 0.85)
-  if (category === "telemarketing") return buildResponse("Démarchage probable", "telemarketing", 0.8)
+    const category = canonicalCategory(row.category)
+
+    if (category === "fraud") return buildResponse("Fraude probable", "fraud", 0.9)
+    if (category === "spam") return buildResponse("Spam probable", "spam", 0.85)
+    if (category === "telemarketing") return buildResponse("Démarchage probable", "telemarketing", 0.8)
+  } catch (error) {
+    console.error("fallback_reports_lookup_failed", error)
+  }
 
   return null
 }
