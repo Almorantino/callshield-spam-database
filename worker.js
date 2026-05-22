@@ -712,7 +712,7 @@ async function buildLocalThreatGraph(env, number, normalizedMessage) {
 
 async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
   try {
-    const [numberRow, messageRow, feedbackRow] = await Promise.all([
+    const [numberRow, messageRow, feedbackRow, feedbackEventRow] = await Promise.all([
       env.DB.prepare(`
         SELECT COUNT(*) as count
         FROM sms_analysis_dataset
@@ -738,6 +738,18 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
       `)
         .bind(number || "", normalizedMessage)
         .first(),
+      number
+        ? env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN primary_category = 'fraud' OR user_disposition = 'reported_scam' THEN 1 ELSE 0 END) as scam_count,
+            SUM(CASE WHEN primary_category = 'safe' OR user_disposition = 'marked_safe' THEN 1 ELSE 0 END) as safe_count
+          FROM feedback_events
+          WHERE number_e164 = ?1
+            AND validation_status = 'accepted'
+        `)
+          .bind(number)
+          .first()
+        : Promise.resolve({ scam_count: 0, safe_count: 0 }),
     ])
 
     const numberCount = Number(numberRow?.count || 0)
@@ -745,6 +757,10 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
     const distinctNumbers = Number(messageRow?.distinct_numbers || 0)
     const scamCount = Number(feedbackRow?.scam_count || 0)
     const safeCount = Number(feedbackRow?.safe_count || 0)
+    const feedbackEventScamCount = Number(feedbackEventRow?.scam_count || 0)
+    const feedbackEventSafeCount = Number(feedbackEventRow?.safe_count || 0)
+    const confirmedScamCount = Math.max(scamCount, feedbackEventScamCount)
+    const confirmedSafeCount = Math.max(safeCount, feedbackEventSafeCount)
 
     let score = 0
     const reasons = []
@@ -776,12 +792,12 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
       reasons.push("CAMPAIGN_PATTERN_CONFIRMED")
     }
 
-    if (scamCount >= 2) {
+    if (confirmedScamCount >= 2 && confirmedScamCount > confirmedSafeCount) {
       score += 30
       reasons.push("USER_CONFIRMED_SCAM")
     }
 
-    if (safeCount >= 2) {
+    if (confirmedSafeCount >= 2 && confirmedSafeCount > confirmedScamCount) {
       score -= 25
       reasons.push("USER_CONFIRMED_SAFE")
     }
@@ -3164,7 +3180,7 @@ async function handleNativeReport(env, body, forcedChannel = null) {
   ).trim().toLowerCase()
 
   const number = normalizeNumber(
-    body?.number || body?.phone_number || body?.phoneNumber || ""
+    body?.number || body?.phone_number || body?.phoneNumber || body?.sender || ""
   )
   const message = String(body?.message || "").trim()
   const source = String(body?.source || "ios_reporting_extension").trim() || "ios_reporting_extension"
