@@ -23,11 +23,23 @@ function jsonResponse(payload, status = 200) {
   })
 }
 
+function healthResponse() {
+  return jsonResponse({
+    ok: true,
+    service: "callshield-report",
+    worker_version: "v4",
+  })
+}
+
 function appleAppSiteAssociationResponse() {
   return new Response(JSON.stringify(APPLE_APP_SITE_ASSOCIATION), {
     status: 200,
     headers: JSON_HEADERS,
   })
+}
+
+function liveCallerIDToken(env) {
+  return String(env?.LIVE_CALLER_ID_TOKEN || "").trim() || "callshield-dev-token"
 }
 
 function normalizeNumber(value) {
@@ -435,6 +447,7 @@ async function lookupTrustedDomains(env, domains = []) {
     const fraudRootDomains = []
     let maxTrustScore = 0
     let trustLevel = "low"
+    const trustedTrustLevels = new Set(["verified", "high"])
 
     for (const row of results) {
       const status = String(row?.status || "").toLowerCase()
@@ -444,17 +457,23 @@ async function lookupTrustedDomains(env, domains = []) {
         continue
       }
 
+      const rowTrustScore = Number(row?.trust_score || 0)
+      const rowTrustLevel = String(row?.trust_level || "").toLowerCase()
+      if (rowTrustScore < 80 && !trustedTrustLevels.has(rowTrustLevel)) {
+        continue
+      }
+
       if (row?.domain) matchedDomains.push(String(row.domain))
       if (row?.root_domain) matchedRootDomains.push(String(row.root_domain))
       if (row?.brand_key) brandKeys.push(String(row.brand_key))
-      if (Number(row?.trust_score || 0) > maxTrustScore) {
-        maxTrustScore = Number(row.trust_score || 0)
+      if (rowTrustScore > maxTrustScore) {
+        maxTrustScore = rowTrustScore
       }
-      if (String(row?.trust_level || "").toLowerCase() === "verified") {
+      if (rowTrustLevel === "verified") {
         trustLevel = "verified"
-      } else if (trustLevel !== "verified" && String(row?.trust_level || "").toLowerCase() === "high") {
+      } else if (trustLevel !== "verified" && rowTrustLevel === "high") {
         trustLevel = "high"
-      } else if (trustLevel === "low" && String(row?.trust_level || "").toLowerCase() === "medium") {
+      } else if (trustLevel === "low" && rowTrustLevel === "medium") {
         trustLevel = "medium"
       }
     }
@@ -2240,7 +2259,7 @@ function normalizeFeedbackBatchEvent(rawEvent, batchSource) {
 async function persistFeedbackBatchEvent(env, event) {
   try {
     const existing = await env.DB.prepare(`
-      SELECT id
+      SELECT rowid AS id
       FROM feedback_events
       WHERE dedupe_key = ?1
       LIMIT 1
@@ -2351,7 +2370,7 @@ async function persistFeedbackEvent(env, {
 
   try {
     const existing = await env.DB.prepare(`
-      SELECT id
+      SELECT rowid AS id
       FROM feedback_events
       WHERE dedupe_key = ?1
       LIMIT 1
@@ -3270,6 +3289,10 @@ export default {
     try {
       const url = new URL(request.url)
 
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
+        return healthResponse()
+      }
+
       if (request.method === "GET" && url.pathname === "/.well-known/apple-app-site-association") {
         return appleAppSiteAssociationResponse()
       }
@@ -3288,7 +3311,7 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/live-caller-id/token") {
         return jsonResponse({
-          token: "callshield-dev-token",
+          token: liveCallerIDToken(env),
           expires_in: 3600,
         })
       }
