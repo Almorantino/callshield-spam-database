@@ -575,7 +575,7 @@ async function checkCarrierRisk(env, number) {
       reasons.push("CARRIER_FLAGGED_SPAM")
     }
 
-    if (typeof data?.provider === "string" && data.provider.includes("voip")) {
+    if (typeof data?.provider === "string" && data.provider.toLowerCase().includes("voip")) {
       score += 15
       reasons.push("VOIP_NUMBER")
     }
@@ -1532,6 +1532,8 @@ async function buildFinalAnalysis(env, {
     "HIGH_REPEAT_MESSAGE",
     "MULTI_NUMBER_SAME_MESSAGE",
     "CAMPAIGN_PATTERN_CONFIRMED",
+    "USER_CONFIRMED_SCAM",
+    "USER_CONFIRMED_SAFE",
     "SHORT_WITH_LINK",
     "LOW_QUALITY_TEXT",
     "NUMERIC_HEAVY",
@@ -1559,6 +1561,7 @@ async function buildFinalAnalysis(env, {
     "KNOWN_BAD_ACTOR",
     "IP_URL",
     "DASH_DOMAIN",
+    "URL_TRUSTED",
     "TRUSTED_DOMAIN",
   ])
 
@@ -1684,6 +1687,8 @@ async function buildFinalAnalysis(env, {
     reason_codes.includes("TELEMARKETING_PATTERN") &&
     !reason_codes.includes("OTP_SCAM") &&
     !reason_codes.includes("KNOWN_FRAUD_NUMBER") &&
+    !reason_codes.includes("GLOBAL_SCAM_DETECTED") &&
+    !reason_codes.includes("HIGH_THREAT_GRAPH") &&
     !reason_codes.includes("KNOWN_MALICIOUS_DOMAIN") &&
     !reason_codes.includes("IP_URL") &&
     !reason_codes.includes("BRAND_SPOOF") &&
@@ -1691,6 +1696,9 @@ async function buildFinalAnalysis(env, {
     !reason_codes.includes("PHISHING_INTENT") &&
     !reason_codes.includes("ACCOUNT_THREAT") &&
     !reason_codes.includes("STRONG_CORRELATED_SCAM") &&
+    !reason_codes.includes("CAMPAIGN_WITH_LINK") &&
+    !reason_codes.includes("KNOWN_BAD_ACTOR") &&
+    !reason_codes.includes("USER_CONFIRMED_SCAM") &&
     !reason_codes.includes("SUSPICIOUS_DOMAIN") &&
     !reason_codes.includes("RISKY_TLD")
 
@@ -1996,6 +2004,205 @@ function feedbackEventPayloadFromUserFeedback(userFeedback) {
   }
 }
 
+function feedbackEventPayloadFromCategory(category, userDisposition = "") {
+  const rawCategory = String(category || "unknown").trim().toLowerCase()
+  const primaryCategory = ["false_positive", "not_spam"].includes(rawCategory)
+    ? "safe"
+    : canonicalCategory(rawCategory)
+  const requestedDisposition = String(userDisposition || "").trim().toLowerCase()
+  const allowedDispositions = new Set([
+    "reported_fraud",
+    "reported_spam",
+    "reported_telemarketing",
+    "reported_unknown",
+    "marked_safe",
+    "wrong_detection",
+    "unknown",
+  ])
+
+  switch (primaryCategory) {
+    case "fraud":
+      return {
+        primaryCategory,
+        secondaryCategory: null,
+        userDisposition: "reported_fraud",
+        scamFlag: 1,
+      }
+    case "spam":
+      return {
+        primaryCategory,
+        secondaryCategory: null,
+        userDisposition: "reported_spam",
+        scamFlag: 0,
+      }
+    case "telemarketing":
+      return {
+        primaryCategory,
+        secondaryCategory: null,
+        userDisposition: "reported_telemarketing",
+        scamFlag: 0,
+      }
+    case "safe":
+      return {
+        primaryCategory,
+        secondaryCategory: null,
+        userDisposition: "marked_safe",
+        scamFlag: 0,
+      }
+    default:
+      return {
+        primaryCategory: "unknown",
+        secondaryCategory: null,
+        userDisposition: allowedDispositions.has(requestedDisposition) ? requestedDisposition : "reported_unknown",
+        scamFlag: 0,
+      }
+  }
+}
+
+function normalizeFeedbackTimestamp(value) {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now()
+}
+
+function normalizeFeedbackBatchEvent(rawEvent, batchSource) {
+  const event = rawEvent && typeof rawEvent === "object" && !Array.isArray(rawEvent)
+    ? rawEvent
+    : null
+
+  if (!event) return null
+
+  const eventId = String(event.event_id || event.eventId || event.id || "").trim()
+  const number = normalizeNumber(
+    event.number_e164 || event.number || event.phone_number || event.phoneNumber || ""
+  )
+
+  if (!eventId || !number) return null
+
+  const payload = feedbackEventPayloadFromCategory(
+    event.primary_category || event.category,
+    event.user_disposition
+  )
+  const createdAt = normalizeFeedbackTimestamp(event.created_at ?? event.createdAt)
+  const sourceContext = String(event.source_context || event.sourceContext || "ios_feedback_batch").trim() || "ios_feedback_batch"
+  const dedupeKey = String(event.dedupe_key || event.dedupeKey || eventId).trim()
+
+  return {
+    eventId,
+    dedupeKey,
+    number,
+    eventType: String(event.event_type || event.eventType || "user_report").trim() || "user_report",
+    primaryCategory: payload.primaryCategory,
+    secondaryCategory: payload.secondaryCategory,
+    userDisposition: payload.userDisposition,
+    sourceContext,
+    scamFlag: payload.scamFlag,
+    source: String(event.source || batchSource || "ios").trim() || "ios",
+    platform: String(event.platform || "ios").trim() || "ios",
+    appVersion: String(event.app_version || event.appVersion || "unknown").trim() || "unknown",
+    createdAt,
+    receivedAt: Date.now(),
+  }
+}
+
+async function persistFeedbackBatchEvent(env, event) {
+  try {
+    const existing = await env.DB.prepare(`
+      SELECT id
+      FROM feedback_events
+      WHERE dedupe_key = ?1
+      LIMIT 1
+    `)
+      .bind(event.dedupeKey)
+      .first()
+
+    if (existing?.id) {
+      return true
+    }
+  } catch (error) {
+    console.error("feedback_batch_dedupe_lookup_failed", error)
+  }
+
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO feedback_events (
+        event_id,
+        number_e164,
+        event_type,
+        primary_category,
+        secondary_category,
+        user_disposition,
+        source_context,
+        displayed_label_at_time,
+        displayed_confidence_band_at_time,
+        dataset_presence_at_time,
+        callkit_state_at_time,
+        scam_flag,
+        source,
+        platform,
+        app_version,
+        created_at,
+        received_at,
+        dedupe_key,
+        validation_status
+      ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
+      )
+    `)
+      .bind(
+        event.eventId,
+        event.number,
+        event.eventType,
+        event.primaryCategory,
+        event.secondaryCategory,
+        event.userDisposition,
+        event.sourceContext,
+        null,
+        null,
+        null,
+        null,
+        event.scamFlag,
+        event.source,
+        event.platform,
+        event.appVersion,
+        event.createdAt,
+        event.receivedAt,
+        event.dedupeKey,
+        "accepted"
+      )
+      .run()
+
+    return Number(result?.meta?.changes || 0) > 0
+  } catch (error) {
+    console.error("feedback_batch_insert_failed", error)
+    return false
+  }
+}
+
+async function handleSMSFeedbackBatch(env, body) {
+  const rawEvents = Array.isArray(body?.events) ? body.events : []
+  const events = rawEvents.slice(0, 500)
+  const source = String(body?.source || "ios").trim() || "ios"
+  let accepted = 0
+  let inserted = 0
+
+  for (const rawEvent of events) {
+    const event = normalizeFeedbackBatchEvent(rawEvent, source)
+    if (!event) continue
+
+    accepted += 1
+    if (await persistFeedbackBatchEvent(env, event)) {
+      inserted += 1
+    }
+  }
+
+  return jsonResponse({
+    status: "ok",
+    received: rawEvents.length,
+    accepted,
+    inserted,
+  })
+}
+
 async function persistFeedbackEvent(env, {
   inputHash,
   number,
@@ -2115,6 +2322,10 @@ async function persistFeedbackEvent(env, {
 }
 
 async function handleSMSFeedback(env, body) {
+  if (Array.isArray(body?.events)) {
+    return await handleSMSFeedbackBatch(env, body)
+  }
+
   const message = normalizeText(body?.message)
   const number = normalizeNumber(
     body?.number || body?.phone_number || body?.phoneNumber || body?.sender || ""
@@ -2422,6 +2633,7 @@ async function handleSMSAnalyze(env, body) {
   const localFrequency = trustedTransactional || !suspiciousCore
     ? { score: 0, reasons: [] }
     : await analyzeLocalFrequencySignals(env, number, normalizedMessage)
+  const shouldCheckGlobalThreatGraph = Boolean(number || suspiciousCore)
 
   const fastDecision = await fastHeuristicDecision(env, message, baseHeuristicWithReputation, baseDomains, baseTrustContext)
 
@@ -2496,7 +2708,7 @@ async function handleSMSAnalyze(env, body) {
     checkPhoneReputation(env, number),
     checkCarrierRisk(env, number),
     trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : analyzeCampaignPattern(env, normalizedMessage),
-    fetchGlobalThreatGraph(env, number, normalizedMessage),
+    shouldCheckGlobalThreatGraph ? fetchGlobalThreatGraph(env, number, normalizedMessage) : Promise.resolve({ score: 0, reasons: [] }),
     trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : buildLocalThreatGraph(env, number, normalizedMessage),
   ])
 
