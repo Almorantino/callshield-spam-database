@@ -331,6 +331,36 @@ test("invalid OpenAI payload returns null", async () => {
   assert.equal(result, null)
 })
 
+test("carrier lookup disabled by default does not fetch", async () => {
+  let fetchCalls = 0
+  const carrierContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({ provider: "VoIP Carrier" }), { status: 200 })
+  })
+  const result = await carrierContext.checkCarrierRisk({}, "33612345678")
+
+  assert.equal(fetchCalls, 0)
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("carrier lookup enabled preserves carrier scoring", async () => {
+  const fetchUrls = []
+  const carrierContext = loadWorker(async (url) => {
+    fetchUrls.push(String(url))
+    return new Response(JSON.stringify({ spam: false, provider: "VoIP Carrier" }), { status: 200 })
+  })
+  const result = await carrierContext.checkCarrierRisk(
+    { CARRIER_LOOKUP_ENABLED: "true" },
+    "33612345678"
+  )
+
+  assert.equal(fetchUrls.length, 1)
+  assert.ok(fetchUrls[0].includes("https://messageproviderlookup.com/api?number=33612345678"))
+  assert.equal(result.score, 15)
+  assert.deepEqual(Array.from(result.reasons), ["VOIP_NUMBER"])
+})
+
 test("iOS feedback fraud x2 adds USER_CONFIRMED_SCAM", async () => {
   const env = makeEnv({ feedbackEventCounts: { scam_count: 2, safe_count: 0 } })
   const result = await context.analyzeLocalFrequencySignals(env, "33612345678", "message")

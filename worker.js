@@ -611,6 +611,10 @@ async function checkCarrierRisk(env, number) {
     return { score: 0, reasons: [] }
   }
 
+  if (String(env?.CARRIER_LOOKUP_ENABLED || "").trim() !== "true") {
+    return { score: 0, reasons: [] }
+  }
+
   try {
     const res = await fetchWithTimeout(`https://messageproviderlookup.com/api?number=${encodeURIComponent(number)}`)
     if (!res.ok) return { score: 0, reasons: [] }
