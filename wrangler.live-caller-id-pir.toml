@@ -1,0 +1,18 @@
+name = "callshield-live-caller-id-pir"
+main = "live-caller-id-pir-worker.js"
+compatibility_date = "2026-05-23"
+preview_urls = false
+
+[[containers]]
+class_name = "LiveCallerIDPIRContainer"
+image = "./Dockerfile.live-caller-id-pir"
+instance_type = "basic"
+max_instances = 1
+
+[[durable_objects.bindings]]
+class_name = "LiveCallerIDPIRContainer"
+name = "LIVE_CALLER_ID_PIR"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LiveCallerIDPIRContainer"]

@@ -4,6 +4,7 @@ __pycache__/
 .env
 venv/
 .venv/
+node_modules/
 
 data/raw-source-database.json
 data/scored-database.json

@@ -1,0 +1,15 @@
+*
+
+!CallShieldLiveCallerIDPIRService/
+!CallShieldLiveCallerIDPIRService/Package.swift
+!CallShieldLiveCallerIDPIRService/Package.resolved
+!CallShieldLiveCallerIDPIRService/Sources/
+!CallShieldLiveCallerIDPIRService/Sources/**
+!CallShieldLiveCallerIDPIRService/Tests/
+!CallShieldLiveCallerIDPIRService/Tests/**
+
+!data/
+!data/live-caller-id-pir/
+!data/live-caller-id-pir/**
+
+!Dockerfile.live-caller-id-pir

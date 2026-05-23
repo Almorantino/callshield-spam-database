@@ -1,0 +1,8 @@
+{
+  "name": "callshield-live-caller-id-pir-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.4"
+  }
+}

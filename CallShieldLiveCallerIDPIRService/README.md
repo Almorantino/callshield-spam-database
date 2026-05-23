@@ -21,6 +21,18 @@ CallShield container staging:
   Privacy Pass issuer, service URL, and DNS TXT
   `apple-live-caller-id-lookup=com.almorantino.callshield.CallShieldLiveCallerID`.
 
+CallShield Cloudflare Containers staging:
+- Docker must be installed and running locally before `wrangler deploy`; Wrangler builds and pushes
+  the container image during deployment.
+- Deploy from the scraper repo root with:
+  `wrangler deploy --config wrangler.live-caller-id-pir.toml`
+- The Cloudflare image build uses `Dockerfile.live-caller-id-pir`, which embeds the generated local
+  `data/live-caller-id-pir` files into the container image. Regenerate that dataset before deploying
+  when Live Caller ID data changes.
+- The Worker wrapper uses Cloudflare's `@cloudflare/containers` package so the Durable Object
+  container lifecycle follows the platform-supported `Container` class and `getContainer(...)`
+  helpers.
+
 The original Apple reference README follows.
 
 # PIR Service Example

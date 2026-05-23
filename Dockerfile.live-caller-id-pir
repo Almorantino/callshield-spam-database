@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+
+FROM --platform=linux/amd64 swift:6.1-noble AS build
+
+WORKDIR /src
+COPY CallShieldLiveCallerIDPIRService/Package.swift CallShieldLiveCallerIDPIRService/Package.resolved ./
+COPY CallShieldLiveCallerIDPIRService/Sources ./Sources
+COPY CallShieldLiveCallerIDPIRService/Tests ./Tests
+RUN swift build -c release --product PIRService
+
+FROM --platform=linux/amd64 swift:6.1-noble AS runtime
+
+WORKDIR /app
+COPY --from=build /src/.build/release/PIRService /usr/local/bin/PIRService
+COPY data/live-caller-id-pir ./data/live-caller-id-pir
+RUN sed -i \
+  -e 's#"fileStem": "[^"]*/block"#"fileStem": "/app/data/live-caller-id-pir/block"#' \
+  -e 's#"fileStem": "[^"]*/identity"#"fileStem": "/app/data/live-caller-id-pir/identity"#' \
+  /app/data/live-caller-id-pir/service-config.json
+
+EXPOSE 8080
+
+CMD ["PIRService", "--hostname", "0.0.0.0", "--port", "8080", "/app/data/live-caller-id-pir/service-config.json"]
