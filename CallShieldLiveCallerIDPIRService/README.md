@@ -10,6 +10,17 @@ Initial CallShield scope:
 - use protobuf/PIR data generated from the CallShield `live_lookup` dataset in a later patch;
 - patch the iOS Live Caller ID extension only after this service is validated.
 
+CallShield container staging:
+- Build from the scraper repo root with:
+  `docker build -t callshield-live-caller-id-pir CallShieldLiveCallerIDPIRService`
+- Run with the generated PIR dataset mounted read-only:
+  `docker run --rm -p 8080:8080 -v "$PWD/data/live-caller-id-pir:/app/data/live-caller-id-pir:ro" callshield-live-caller-id-pir`
+- The container listens on `0.0.0.0:8080` and loads
+  `/app/data/live-caller-id-pir/service-config.json`.
+- Production still needs Apple onboarding requirements: HTTPS subdomains without paths, OHTTP gateway,
+  Privacy Pass issuer, service URL, and DNS TXT
+  `apple-live-caller-id-lookup=com.almorantino.callshield.CallShieldLiveCallerID`.
+
 The original Apple reference README follows.
 
 # PIR Service Example
