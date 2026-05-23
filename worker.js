@@ -1835,6 +1835,29 @@ async function buildFinalAnalysis(env, {
     }
   }
 
+  const hasSensitiveWorkerReason = reason_codes.some((code) => [
+    "PAYMENT_PRESSURE",
+    "ACCOUNT_THREAT",
+    "PHISHING_INTENT",
+    "FAKE_AUTHORITY",
+    "DELIVERY_SCAM",
+    "JOB_SCAM",
+  ].includes(code))
+  const aiLowSafeOrUnknown =
+    aiScore !== null &&
+    aiScore < 35 &&
+    (aiCategory === "safe" || aiCategory === "unknown") &&
+    aiResult?.is_scam !== true
+
+  if (
+    aiLowSafeOrUnknown &&
+    hasSensitiveWorkerReason &&
+    !trustedTransactional &&
+    !(domainsTrusted && !hasCriticalFraudSignal)
+  ) {
+    finalScore = Math.max(finalScore, 35)
+  }
+
   const hasFakeTracking =
     hasUrl &&
     hasTracking &&

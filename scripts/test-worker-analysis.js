@@ -361,6 +361,40 @@ test("carrier lookup enabled preserves carrier scoring", async () => {
   assert.deepEqual(Array.from(result.reasons), ["VOIP_NUMBER"])
 })
 
+test("safe AI cannot clear payment pressure warning", async () => {
+  const message = "Paiement requis pour votre livraison."
+  const heuristic = context.runHeuristic(message)
+  const result = await context.buildFinalAnalysis(makeEnv(), {
+    heuristicScore: heuristic.score,
+    heuristicReasons: heuristic.reasonCodes,
+    aiResult: { is_scam: false, score: 0, category: "safe", reason_codes: [], explanation: "benin" },
+    decisionSource: "fusion_enriched",
+    explanation: "benin",
+    sourceMessage: message,
+  })
+
+  assert.ok(reasonsOf(result).includes("PAYMENT_PRESSURE"))
+  assert.ok(scoreOf(result) >= 35)
+  assert.equal(decisionOf(result).action, "warn")
+})
+
+test("safe AI cannot clear fake authority warning", async () => {
+  const message = "Assistance securite: verifiez vos informations de compte."
+  const heuristic = context.runHeuristic(message)
+  const result = await context.buildFinalAnalysis(makeEnv(), {
+    heuristicScore: heuristic.score,
+    heuristicReasons: heuristic.reasonCodes,
+    aiResult: { is_scam: false, score: 0, category: "safe", reason_codes: [], explanation: "benin" },
+    decisionSource: "fusion_enriched",
+    explanation: "benin",
+    sourceMessage: message,
+  })
+
+  assert.ok(reasonsOf(result).includes("FAKE_AUTHORITY"))
+  assert.ok(scoreOf(result) >= 35)
+  assert.equal(decisionOf(result).action, "warn")
+})
+
 test("iOS feedback fraud x2 adds USER_CONFIRMED_SCAM", async () => {
   const env = makeEnv({ feedbackEventCounts: { scam_count: 2, safe_count: 0 } })
   const result = await context.analyzeLocalFrequencySignals(env, "33612345678", "message")
