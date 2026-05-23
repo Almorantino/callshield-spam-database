@@ -197,7 +197,7 @@ function loadWorker(fetchImpl = async () => new Response("{}", { status: 404 }))
   return context
 }
 
-async function postJson(context, env, pathname, body) {
+async function postJson(context, env, pathname, body, ctx = {}) {
   const response = await context.worker.fetch(
     new Request(`https://worker.test${pathname}`, {
       method: "POST",
@@ -205,7 +205,7 @@ async function postJson(context, env, pathname, body) {
       body: JSON.stringify(body),
     }),
     env,
-    {}
+    ctx
   )
 
   return {
@@ -257,6 +257,25 @@ test("safe SMS stays safe/allow", async () => {
   assert.equal(decisionOf(result.payload).category, "safe")
   assert.equal(decisionOf(result.payload).action, "allow")
   assert.ok(scoreOf(result.payload) <= 15)
+})
+
+test("sms analysis persistence is scheduled with waitUntil", async () => {
+  const env = makeEnv()
+  const scheduled = []
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Bonjour, votre rendez-vous est confirme demain a 14h.",
+  }, {
+    waitUntil(promise) {
+      scheduled.push(Promise.resolve(promise))
+    },
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(decisionOf(result.payload).action, "allow")
+  assert.equal(scheduled.length, 1)
+
+  await Promise.all(scheduled)
+  assert.equal(env.__db.runs.length, 2)
 })
 
 test("OTP-only SMS stays safe/allow", async () => {

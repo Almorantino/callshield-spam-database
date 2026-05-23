@@ -2142,6 +2142,16 @@ async function persistSMSAnalysis(env, row) {
   await upsertSMSAnalysisDataset(env, row)
 }
 
+function scheduleSMSAnalysisPersistence(ctx, env, row) {
+  const task = persistSMSAnalysis(env, row)
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(task)
+    return Promise.resolve()
+  }
+
+  return task
+}
+
 function reviewedLabelFromFeedback(userFeedback) {
   switch (String(userFeedback || "").trim().toLowerCase()) {
     case "confirmed_scam":
@@ -2738,7 +2748,7 @@ async function fastHeuristicDecision(env, message, precomputedHeuristic = null, 
 
   
 
-async function handleSMSAnalyze(env, body) {
+async function handleSMSAnalyze(env, body, ctx = null) {
   const message = normalizeText(body?.message)
   const number = normalizeNumber(
     body?.number || body?.phone_number || body?.phoneNumber || body?.sender || ""
@@ -2822,7 +2832,7 @@ async function handleSMSAnalyze(env, body) {
     const decision = getAnalysisDecision(result)
     const meta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -2892,7 +2902,7 @@ async function handleSMSAnalyze(env, body) {
     const fastDecisionData = getAnalysisDecision(result)
     const fastMeta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3009,7 +3019,7 @@ async function handleSMSAnalyze(env, body) {
     const lowRiskDecision = getAnalysisDecision(result)
     const lowRiskMeta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3065,7 +3075,7 @@ async function handleSMSAnalyze(env, body) {
     const highRiskDecision = getAnalysisDecision(result)
     const highRiskMeta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3139,7 +3149,7 @@ async function handleSMSAnalyze(env, body) {
     const fusionDecision = getAnalysisDecision(result)
     const fusionMeta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3195,7 +3205,7 @@ async function handleSMSAnalyze(env, body) {
     const fallbackDecision = getAnalysisDecision(result)
     const fallbackMeta = getAnalysisMeta(result)
 
-    await persistSMSAnalysis(env, {
+    await scheduleSMSAnalysisPersistence(ctx, env, {
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3374,7 +3384,7 @@ async function handleNativeReport(env, body, forcedChannel = null) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url)
 
@@ -3410,7 +3420,7 @@ export default {
         if (!body) {
           return jsonResponse({ error: "invalid json" }, 400)
         }
-        return await handleSMSAnalyze(env, body)
+        return await handleSMSAnalyze(env, body, ctx)
       }
 
       if (request.method === "POST" && url.pathname === "/ai/sms/feedback") {
