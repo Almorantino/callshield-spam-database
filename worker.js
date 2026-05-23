@@ -714,16 +714,34 @@ async function buildLocalThreatGraph(env, number, normalizedMessage) {
   }
 }
 
+function localThreatGraphFromCount(count) {
+  const total = Number(count || 0)
+  let score = 0
+  const reasons = []
+
+  if (total > 30) {
+    score += 35
+    reasons.push("LOCAL_GRAPH_HIGH")
+  } else if (total > 10) {
+    score += 20
+    reasons.push("LOCAL_GRAPH_MEDIUM")
+  }
+
+  return { score, reasons }
+}
+
 async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
   try {
     const [numberRow, messageRow, feedbackRow, feedbackEventRow] = await Promise.all([
-      env.DB.prepare(`
-        SELECT COUNT(*) as count
-        FROM sms_analysis_dataset
-        WHERE number_e164 = ?1
-      `)
-        .bind(number || "")
-        .first(),
+      number
+        ? env.DB.prepare(`
+          SELECT COUNT(*) as count
+          FROM sms_analysis_dataset
+          WHERE number_e164 = ?1
+        `)
+          .bind(number)
+          .first()
+        : Promise.resolve({ count: 0 }),
       env.DB.prepare(`
         SELECT COUNT(*) as count,
                COUNT(DISTINCT number_e164) as distinct_numbers
@@ -732,16 +750,26 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
       `)
         .bind(normalizedMessage)
         .first(),
-      env.DB.prepare(`
-        SELECT
-          SUM(CASE WHEN user_feedback = 'confirmed_scam' THEN 1 ELSE 0 END) as scam_count,
-          SUM(CASE WHEN user_feedback = 'confirmed_safe' THEN 1 ELSE 0 END) as safe_count
-        FROM sms_analysis_dataset
-        WHERE number_e164 = ?1
-           OR normalized_message = ?2
-      `)
-        .bind(number || "", normalizedMessage)
-        .first(),
+      number
+        ? env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN user_feedback = 'confirmed_scam' THEN 1 ELSE 0 END) as scam_count,
+            SUM(CASE WHEN user_feedback = 'confirmed_safe' THEN 1 ELSE 0 END) as safe_count
+          FROM sms_analysis_dataset
+          WHERE number_e164 = ?1
+             OR normalized_message = ?2
+        `)
+          .bind(number, normalizedMessage)
+          .first()
+        : env.DB.prepare(`
+          SELECT
+            SUM(CASE WHEN user_feedback = 'confirmed_scam' THEN 1 ELSE 0 END) as scam_count,
+            SUM(CASE WHEN user_feedback = 'confirmed_safe' THEN 1 ELSE 0 END) as safe_count
+          FROM sms_analysis_dataset
+          WHERE normalized_message = ?1
+        `)
+          .bind(normalizedMessage)
+          .first(),
       number
         ? env.DB.prepare(`
           SELECT
@@ -806,9 +834,9 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
       reasons.push("USER_CONFIRMED_SAFE")
     }
 
-    return { score, reasons }
+    return { score, reasons, numberCount, messageCount, distinctNumbers }
   } catch {
-    return { score: 0, reasons: [] }
+    return { score: 0, reasons: [], numberCount: 0, messageCount: 0, distinctNumbers: 0 }
   }
 }
 
@@ -1246,6 +1274,22 @@ async function analyzeNumberCluster(env, number) {
   }
 }
 
+function campaignPatternFromDistinctNumbers(distinctNumbers) {
+  const unique = Number(distinctNumbers || 0)
+  let score = 0
+  const reasons = []
+
+  if (unique > 20) {
+    score += 40
+    reasons.push("MULTI_NUMBER_CAMPAIGN")
+  } else if (unique > 10) {
+    score += 25
+    reasons.push("SPREAD_CAMPAIGN")
+  }
+
+  return { score, reasons }
+}
+
 async function analyzeCampaignPattern(env, normalizedMessage) {
   try {
     const row = await env.DB.prepare(`
@@ -1256,19 +1300,7 @@ async function analyzeCampaignPattern(env, normalizedMessage) {
       .bind(normalizedMessage)
       .first()
 
-    const unique = row?.unique_numbers || 0
-    let score = 0
-    const reasons = []
-
-    if (unique > 20) {
-      score += 40
-      reasons.push("MULTI_NUMBER_CAMPAIGN")
-    } else if (unique > 10) {
-      score += 25
-      reasons.push("SPREAD_CAMPAIGN")
-    }
-
-    return { score, reasons }
+    return campaignPatternFromDistinctNumbers(row?.unique_numbers)
   } catch {
     return { score: 0, reasons: [] }
   }
@@ -2896,6 +2928,9 @@ async function handleSMSAnalyze(env, body) {
   }
 
 
+  const campaignFromFrequency = campaignPatternFromDistinctNumbers(localFrequency.distinctNumbers)
+  const localGraphFromFrequency = localThreatGraphFromCount(localFrequency.messageCount)
+
   const [
     domainRisk,
     cluster,
@@ -2909,9 +2944,13 @@ async function handleSMSAnalyze(env, body) {
     trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : analyzeNumberCluster(env, number),
     checkPhoneReputation(env, number),
     checkCarrierRisk(env, number),
-    trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : analyzeCampaignPattern(env, normalizedMessage),
+    trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : Promise.resolve(campaignFromFrequency),
     shouldCheckGlobalThreatGraph ? fetchGlobalThreatGraph(env, number, normalizedMessage) : Promise.resolve({ score: 0, reasons: [] }),
-    trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : buildLocalThreatGraph(env, number, normalizedMessage),
+    trustedTransactional || !suspiciousCore
+      ? Promise.resolve({ score: 0, reasons: [] })
+      : number
+        ? buildLocalThreatGraph(env, number, normalizedMessage)
+        : Promise.resolve(localGraphFromFrequency),
   ])
 
   const correlation = correlateSignals({

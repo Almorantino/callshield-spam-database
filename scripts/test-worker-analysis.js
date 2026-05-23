@@ -395,6 +395,55 @@ test("safe AI cannot clear fake authority warning", async () => {
   assert.equal(decisionOf(result).action, "warn")
 })
 
+test("ambiguous AI window without number avoids redundant D1 reads", async () => {
+  let fetchCalls = 0
+  const aiContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 0,
+        category: "safe",
+        reason_codes: [],
+        explanation: "benin",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({ openAIKey: "test-key" })
+  const result = await postJson(aiContext, env, "/ai/sms/analyze", {
+    message: "Paiement requis pour votre livraison.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.equal(fetchCalls, 1)
+  assert.ok(env.__db.statements.length <= 4, `expected <= 4 D1 statements, got ${env.__db.statements.length}`)
+  assert.equal(
+    env.__db.statements.filter((sql) => sql.includes("WHERE number_e164 = ?1")).length,
+    0
+  )
+})
+
+test("frequency counters preserve derived campaign and local graph scoring", async () => {
+  const spread = context.campaignPatternFromDistinctNumbers(11)
+  assert.equal(spread.score, 25)
+  assert.deepEqual(Array.from(spread.reasons), ["SPREAD_CAMPAIGN"])
+
+  const multi = context.campaignPatternFromDistinctNumbers(21)
+  assert.equal(multi.score, 40)
+  assert.deepEqual(Array.from(multi.reasons), ["MULTI_NUMBER_CAMPAIGN"])
+
+  const medium = context.localThreatGraphFromCount(11)
+  assert.equal(medium.score, 20)
+  assert.deepEqual(Array.from(medium.reasons), ["LOCAL_GRAPH_MEDIUM"])
+
+  const high = context.localThreatGraphFromCount(31)
+  assert.equal(high.score, 35)
+  assert.deepEqual(Array.from(high.reasons), ["LOCAL_GRAPH_HIGH"])
+})
+
 test("iOS feedback fraud x2 adds USER_CONFIRMED_SCAM", async () => {
   const env = makeEnv({ feedbackEventCounts: { scam_count: 2, safe_count: 0 } })
   const result = await context.analyzeLocalFrequencySignals(env, "33612345678", "message")
