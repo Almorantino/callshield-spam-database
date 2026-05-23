@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+.env
+.dev.vars
+.wrangler
+node_modules
+**/.build
+**/.swiftpm
+**/.DS_Store
+*.log
+wrangler-*.log

@@ -5,7 +5,7 @@ preview_urls = false
 
 [[containers]]
 class_name = "LiveCallerIDPIRContainer"
-image = "./Dockerfile.live-caller-id-pir"
+image = "registry.cloudflare.com/45c093e9c1777e9c2bffe82f34448929/callshield-live-caller-id-pir:token-base64-padding"
 instance_type = "basic"
 max_instances = 1
 

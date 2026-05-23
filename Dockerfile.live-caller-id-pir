@@ -4,9 +4,12 @@ FROM --platform=linux/amd64 swift:6.1-noble AS build
 
 WORKDIR /src
 COPY CallShieldLiveCallerIDPIRService/Package.swift CallShieldLiveCallerIDPIRService/Package.resolved ./
+RUN --mount=type=cache,target=/root/.cache/org.swift.swiftpm \
+  swift package resolve
 COPY CallShieldLiveCallerIDPIRService/Sources ./Sources
 COPY CallShieldLiveCallerIDPIRService/Tests ./Tests
-RUN swift build -c release --product PIRService
+RUN --mount=type=cache,target=/root/.cache/org.swift.swiftpm \
+  swift build -c release --product PIRService
 
 FROM --platform=linux/amd64 swift:6.1-noble AS runtime
 
