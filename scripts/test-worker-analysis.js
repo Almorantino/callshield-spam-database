@@ -165,6 +165,12 @@ function makeEnv(options = {}) {
     DB: db,
     OPENAI_API_KEY: options.openAIKey || "",
     OPENAI_MODEL: "gpt-5-mini",
+    DOMAIN_CHECK_API_KEY: options.domainCheckApiKey || "",
+    DOMAIN_API_USER: options.domainApiUser || "",
+    REPUTATION_API_KEY: options.reputationApiKey || "",
+    THREAT_GRAPH_URL: options.threatGraphUrl || "",
+    THREAT_GRAPH_KEY: options.threatGraphKey || "",
+    CARRIER_LOOKUP_ENABLED: options.carrierLookupEnabled || "",
     LIVE_CALLER_ID_TOKEN: "test-live-token",
     __db: db,
   }
@@ -292,6 +298,47 @@ test("Apple Message Filter payload without text is rejected", async () => {
 
   assert.equal(result.status, 400)
   assert.deepEqual(result.payload, { error: "missing message" })
+})
+
+test("Apple Message Filter fast budget skips OpenAI and external fetches", async () => {
+  let fetchCalls = 0
+  const appleContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 0,
+        category: "safe",
+        reason_codes: [],
+        explanation: "benin",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({
+    openAIKey: "test-key",
+    domainCheckApiKey: "domain-key",
+    domainApiUser: "domain-user",
+    reputationApiKey: "rep-key",
+    threatGraphUrl: "https://threat.test/analyze",
+    threatGraphKey: "threat-key",
+    carrierLookupEnabled: "true",
+  })
+  const result = await postJson(appleContext, env, "/ai/sms/analyze", {
+    _version: 1,
+    query: {
+      sender: "+33 6 12 34 56 78",
+      message: {
+        text: "Paiement requis pour votre livraison.",
+      },
+    },
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 0)
+  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.ok(reasonsOf(result.payload).includes("PAYMENT_PRESSURE"))
 })
 
 test("sms analysis persistence is scheduled with waitUntil", async () => {

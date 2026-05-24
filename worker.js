@@ -2775,9 +2775,19 @@ function smsAnalyzeNumberFromBody(body) {
   ]))
 }
 
+function isAppleMessageFilterAnalyzeBody(body) {
+  return Boolean(
+    body &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    (body._version !== undefined || body.query !== undefined)
+  )
+}
+
 async function handleSMSAnalyze(env, body, ctx = null) {
   const message = smsAnalyzeMessageFromBody(body)
   const number = smsAnalyzeNumberFromBody(body)
+  const appleFastBudget = isAppleMessageFilterAnalyzeBody(body)
 
   if (!message) {
     return jsonResponse({ error: "missing message" }, 400)
@@ -2965,6 +2975,8 @@ async function handleSMSAnalyze(env, body, ctx = null) {
 
   const campaignFromFrequency = campaignPatternFromDistinctNumbers(localFrequency.distinctNumbers)
   const localGraphFromFrequency = localThreatGraphFromCount(localFrequency.messageCount)
+  const useExternalEnrichment = !appleFastBudget
+  const usedDomainAge = useExternalEnrichment && baseHasUrl
 
   const [
     domainRisk,
@@ -2975,12 +2987,12 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     globalGraph,
     localGraph,
   ] = await Promise.all([
-    baseHasUrl ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
+    usedDomainAge ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
     trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : analyzeNumberCluster(env, number),
-    checkPhoneReputation(env, number),
-    checkCarrierRisk(env, number),
+    useExternalEnrichment ? checkPhoneReputation(env, number) : Promise.resolve({ score: 0, reasons: [] }),
+    useExternalEnrichment ? checkCarrierRisk(env, number) : Promise.resolve({ score: 0, reasons: [] }),
     trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : Promise.resolve(campaignFromFrequency),
-    shouldCheckGlobalThreatGraph ? fetchGlobalThreatGraph(env, number, normalizedMessage) : Promise.resolve({ score: 0, reasons: [] }),
+    useExternalEnrichment && shouldCheckGlobalThreatGraph ? fetchGlobalThreatGraph(env, number, normalizedMessage) : Promise.resolve({ score: 0, reasons: [] }),
     trustedTransactional || !suspiciousCore
       ? Promise.resolve({ score: 0, reasons: [] })
       : number
@@ -3073,7 +3085,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       category: lowRiskDecision.category,
       processing_time_ms: Date.now() - startedAt,
       used_ai: false,
-      used_domain_age: baseHasUrl,
+      used_domain_age: usedDomainAge,
     }))
 
     return jsonResponse(result)
@@ -3129,7 +3141,66 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       category: highRiskDecision.category,
       processing_time_ms: Date.now() - startedAt,
       used_ai: false,
-      used_domain_age: baseHasUrl,
+      used_domain_age: usedDomainAge,
+    }))
+
+    return jsonResponse(result)
+  }
+
+  if (appleFastBudget) {
+    const appleHeuristicScore = requiresAIReviewForLowScore(message, combinedReasons)
+      ? Math.max(enrichedHeuristicScore, 35)
+      : enrichedHeuristicScore
+    const rawResult = await buildFinalAnalysis(env, {
+      heuristicScore: appleHeuristicScore,
+      heuristicReasons: combinedReasons,
+      aiResult: null,
+      decisionSource: "heuristic_fallback_enriched",
+      explanation: "Décision heuristique enrichie avec budget extension Apple.",
+      sourceMessage: message,
+      precomputedDomains: baseDomains,
+      precomputedTrustContext: baseTrustContext,
+    })
+
+    const result = finalizeCanonicalAnalysisResult(rawResult, {
+      inputHash,
+      modelVersion: "apple_fast_v1",
+      processingTimeMs: Date.now() - startedAt,
+    })
+
+    const appleDecision = getAnalysisDecision(result)
+    const appleMeta = getAnalysisMeta(result)
+
+    await scheduleSMSAnalysisPersistence(ctx, env, {
+      input_hash: inputHash,
+      number_e164: number || null,
+      message,
+      normalized_message: normalizedMessage,
+      heuristic_score: appleHeuristicScore,
+      ai_score: null,
+      final_score: getAnalysisScore(result),
+      risk_level: appleDecision.risk_level,
+      action: appleDecision.action,
+      category: appleDecision.category,
+      decision_source: appleDecision.decision_source,
+      model: appleMeta.model,
+      model_version: appleMeta.model_version || "apple_fast_v1",
+      reason_codes_json: JSON.stringify(appleDecision.reason_codes || []),
+      explanation: appleDecision.explanation || "",
+      user_feedback: null,
+      reviewed_label: null,
+    })
+
+    monitorPath = "apple_fast_budget"
+    console.log("sms_analyze_path", JSON.stringify({
+      path: monitorPath,
+      number: number || null,
+      score: getAnalysisScore(result),
+      action: appleDecision.action,
+      category: appleDecision.category,
+      processing_time_ms: Date.now() - startedAt,
+      used_ai: false,
+      used_domain_age: usedDomainAge,
     }))
 
     return jsonResponse(result)
@@ -3203,7 +3274,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       category: fusionDecision.category,
       processing_time_ms: Date.now() - startedAt,
       used_ai: aiResult !== null,
-      used_domain_age: baseHasUrl,
+      used_domain_age: usedDomainAge,
     }))
 
     return jsonResponse(result)
@@ -3259,7 +3330,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       category: fallbackDecision.category,
       processing_time_ms: Date.now() - startedAt,
       used_ai: false,
-      used_domain_age: baseHasUrl,
+      used_domain_age: usedDomainAge,
     }))
 
     return jsonResponse(result)
