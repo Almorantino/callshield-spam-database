@@ -1,7 +1,12 @@
 name = "callshield-live-caller-id-pir"
 main = "live-caller-id-pir-worker.js"
 compatibility_date = "2026-05-23"
+workers_dev = true
 preview_urls = false
+
+[[routes]]
+pattern = "live.veyril.com"
+custom_domain = true
 
 [[containers]]
 class_name = "LiveCallerIDPIRContainer"

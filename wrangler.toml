@@ -1,0 +1,14 @@
+name = "callshield-report"
+main = "worker.js"
+compatibility_date = "2026-03-26"
+workers_dev = true
+preview_urls = false
+
+[[routes]]
+pattern = "api.veyril.com"
+custom_domain = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "callshield-reports"
+database_id = "5ab8e00c-ca49-40ff-a064-7b02d810105d"
