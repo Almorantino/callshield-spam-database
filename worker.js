@@ -2748,11 +2748,36 @@ async function fastHeuristicDecision(env, message, precomputedHeuristic = null, 
 
   
 
+function firstNonEmptyValue(values = []) {
+  for (const value of values) {
+    const normalized = normalizeText(value)
+    if (normalized) return normalized
+  }
+
+  return ""
+}
+
+function smsAnalyzeMessageFromBody(body) {
+  return firstNonEmptyValue([
+    body?.message,
+    body?.query?.message?.text,
+    body?.query?.message?.body,
+  ])
+}
+
+function smsAnalyzeNumberFromBody(body) {
+  return normalizeNumber(firstNonEmptyValue([
+    body?.number,
+    body?.phone_number,
+    body?.phoneNumber,
+    body?.sender,
+    body?.query?.sender,
+  ]))
+}
+
 async function handleSMSAnalyze(env, body, ctx = null) {
-  const message = normalizeText(body?.message)
-  const number = normalizeNumber(
-    body?.number || body?.phone_number || body?.phoneNumber || body?.sender || ""
-  )
+  const message = smsAnalyzeMessageFromBody(body)
+  const number = smsAnalyzeNumberFromBody(body)
 
   if (!message) {
     return jsonResponse({ error: "missing message" }, 400)

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-"use strict"
 
-const assert = require("node:assert/strict")
-const fs = require("node:fs")
-const path = require("node:path")
-const vm = require("node:vm")
+import assert from "node:assert/strict"
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import vm from "node:vm"
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 const workerPath = path.join(__dirname, "..", "worker.js")
 
 function normalizeSql(sql) {
@@ -257,6 +259,39 @@ test("safe SMS stays safe/allow", async () => {
   assert.equal(decisionOf(result.payload).category, "safe")
   assert.equal(decisionOf(result.payload).action, "allow")
   assert.ok(scoreOf(result.payload) <= 15)
+})
+
+test("Apple Message Filter payload is accepted", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    _version: 1,
+    query: {
+      sender: "+33 6 12 34 56 78",
+      message: {
+        text: "Bonjour, votre rendez-vous est confirme demain a 14h.",
+      },
+    },
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.input.raw, "Bonjour, votre rendez-vous est confirme demain a 14h.")
+  assert.equal(decisionOf(result.payload).category, "safe")
+  assert.equal(decisionOf(result.payload).action, "allow")
+  assert.ok(env.__db.runs.some((run) => run.args.includes("33612345678")))
+})
+
+test("Apple Message Filter payload without text is rejected", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    _version: 1,
+    query: {
+      sender: "+33 6 12 34 56 78",
+      message: {},
+    },
+  })
+
+  assert.equal(result.status, 400)
+  assert.deepEqual(result.payload, { error: "missing message" })
 })
 
 test("sms analysis persistence is scheduled with waitUntil", async () => {
