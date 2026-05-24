@@ -1691,6 +1691,36 @@ function finalizeCanonicalAnalysisResult(result, {
   }
 }
 
+function logSMSAnalyzePath({
+  path,
+  number,
+  result,
+  startedAt,
+  usedAI = false,
+  usedDomainAge = false,
+  appleFastBudget = false,
+  d1ReadsEstimate = 0,
+}) {
+  const decision = getAnalysisDecision(result)
+  const finalScore = getAnalysisScore(result)
+
+  console.log("sms_analyze_path", JSON.stringify({
+    path,
+    number: number || null,
+    score: finalScore,
+    final_score: finalScore,
+    action: decision.action,
+    category: decision.category,
+    risk_level: decision.risk_level,
+    decision_source: decision.decision_source,
+    processing_time_ms: Date.now() - startedAt,
+    used_ai: Boolean(usedAI),
+    used_domain_age: Boolean(usedDomainAge),
+    apple_fast_budget: Boolean(appleFastBudget),
+    d1_reads_estimate: Math.max(0, Number(d1ReadsEstimate || 0)),
+  }))
+}
+
 async function buildFinalAnalysis(env, {
   heuristicScore,
   heuristicReasons,
@@ -2800,6 +2830,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
 
   const baseHeuristic = runHeuristic(message)
   const baseDomains = collectMessageDomains(message)
+  let d1ReadsEstimate = baseDomains.length > 0 ? 1 : 0
   const baseTrustContext = await lookupTrustedDomains(env, baseDomains)
   const baseDomainReputation = analyzeDomainReputation(baseDomains, baseTrustContext)
   const baseHeuristicWithReputation = {
@@ -2888,16 +2919,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "telemarketing_fast"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: decision.action,
-      category: decision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: false,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge: false,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
     return jsonResponse(result)
   }
 
@@ -2908,6 +2939,11 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseHasSuspiciousPattern ||
     baseHasIdentity ||
     baseHasTelemarketing
+
+  const localFrequencyReadsEstimate = trustedTransactional || !suspiciousCore
+    ? 0
+    : (number ? 4 : 2)
+  d1ReadsEstimate += localFrequencyReadsEstimate
 
   const localFrequency = trustedTransactional || !suspiciousCore
     ? { score: 0, reasons: [] }
@@ -2958,16 +2994,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "fast_heuristic"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: fastDecisionData.action,
-      category: fastDecisionData.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: false,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge: false,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   }
@@ -2977,6 +3013,10 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const localGraphFromFrequency = localThreatGraphFromCount(localFrequency.messageCount)
   const useExternalEnrichment = !appleFastBudget
   const usedDomainAge = useExternalEnrichment && baseHasUrl
+  const useLocalEnrichment = !trustedTransactional && suspiciousCore
+  const clusterReadsEstimate = useLocalEnrichment && number ? 1 : 0
+  const localGraphReadsEstimate = useLocalEnrichment && number ? 1 : 0
+  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate
 
   const [
     domainRisk,
@@ -2988,16 +3028,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     localGraph,
   ] = await Promise.all([
     usedDomainAge ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
-    trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : analyzeNumberCluster(env, number),
+    useLocalEnrichment ? analyzeNumberCluster(env, number) : Promise.resolve({ score: 0, reasons: [] }),
     useExternalEnrichment ? checkPhoneReputation(env, number) : Promise.resolve({ score: 0, reasons: [] }),
     useExternalEnrichment ? checkCarrierRisk(env, number) : Promise.resolve({ score: 0, reasons: [] }),
-    trustedTransactional || !suspiciousCore ? Promise.resolve({ score: 0, reasons: [] }) : Promise.resolve(campaignFromFrequency),
+    useLocalEnrichment ? Promise.resolve(campaignFromFrequency) : Promise.resolve({ score: 0, reasons: [] }),
     useExternalEnrichment && shouldCheckGlobalThreatGraph ? fetchGlobalThreatGraph(env, number, normalizedMessage) : Promise.resolve({ score: 0, reasons: [] }),
-    trustedTransactional || !suspiciousCore
-      ? Promise.resolve({ score: 0, reasons: [] })
-      : number
+    useLocalEnrichment
+      ? number
         ? buildLocalThreatGraph(env, number, normalizedMessage)
-        : Promise.resolve(localGraphFromFrequency),
+        : Promise.resolve(localGraphFromFrequency)
+      : Promise.resolve({ score: 0, reasons: [] }),
   ])
 
   const correlation = correlateSignals({
@@ -3077,16 +3117,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "heuristic_low_risk_enriched"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: lowRiskDecision.action,
-      category: lowRiskDecision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: usedDomainAge,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   }
@@ -3133,16 +3173,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "heuristic_high_risk_enriched"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: highRiskDecision.action,
-      category: highRiskDecision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: usedDomainAge,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   }
@@ -3192,16 +3232,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "apple_fast_budget"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: appleDecision.action,
-      category: appleDecision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: usedDomainAge,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   }
@@ -3266,16 +3306,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = aiResult ? "fusion_enriched" : "heuristic_fallback_enriched"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: fusionDecision.action,
-      category: fusionDecision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: aiResult !== null,
-      used_domain_age: usedDomainAge,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: aiResult !== null,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   } catch (error) {
@@ -3322,16 +3362,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "heuristic_fallback_enriched_error"
-    console.log("sms_analyze_path", JSON.stringify({
+    logSMSAnalyzePath({
       path: monitorPath,
-      number: number || null,
-      score: getAnalysisScore(result),
-      action: fallbackDecision.action,
-      category: fallbackDecision.category,
-      processing_time_ms: Date.now() - startedAt,
-      used_ai: false,
-      used_domain_age: usedDomainAge,
-    }))
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
 
     return jsonResponse(result)
   }

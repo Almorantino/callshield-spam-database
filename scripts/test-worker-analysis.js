@@ -176,9 +176,10 @@ function makeEnv(options = {}) {
   }
 }
 
-function loadWorker(fetchImpl = async () => new Response("{}", { status: 404 })) {
+function loadWorker(fetchImpl = async () => new Response("{}", { status: 404 }), options = {}) {
   const source = fs.readFileSync(workerPath, "utf8")
   const code = source.replace("export default {", "globalThis.worker = {")
+  const logSink = typeof options.logSink === "function" ? options.logSink : null
   const context = {
     AbortController,
     Request,
@@ -190,7 +191,9 @@ function loadWorker(fetchImpl = async () => new Response("{}", { status: 404 }))
     fetch: fetchImpl,
     setTimeout,
     console: {
-      log: () => {},
+      log: (...args) => {
+        if (logSink) logSink(args)
+      },
       warn: () => {},
       error: (...args) => {
         if (process.env.CALLSHIELD_TEST_VERBOSE) {
@@ -339,6 +342,45 @@ test("Apple Message Filter fast budget skips OpenAI and external fetches", async
   assert.equal(decisionOf(result.payload).action, "warn")
   assert.ok(scoreOf(result.payload) >= 35)
   assert.ok(reasonsOf(result.payload).includes("PAYMENT_PRESSURE"))
+})
+
+test("sms analysis path log includes observability fields", async () => {
+  const logs = []
+  const observedContext = loadWorker(async () => {
+    return new Response(JSON.stringify({ output_text: "{not json" }), { status: 200 })
+  }, {
+    logSink(args) {
+      logs.push(args)
+    },
+  })
+  const env = makeEnv({ openAIKey: "test-key" })
+  const result = await postJson(observedContext, env, "/ai/sms/analyze", {
+    _version: 1,
+    query: {
+      sender: "+33 6 12 34 56 78",
+      message: {
+        text: "Paiement requis pour votre livraison.",
+      },
+    },
+  })
+
+  const entry = logs.find((args) => args[0] === "sms_analyze_path")
+  assert.ok(entry, "expected sms_analyze_path log")
+
+  const payload = JSON.parse(entry[1])
+  assert.equal(result.status, 200)
+  assert.equal(payload.path, "apple_fast_budget")
+  assert.equal(payload.apple_fast_budget, true)
+  assert.equal(payload.used_ai, false)
+  assert.equal(payload.final_score, scoreOf(result.payload))
+  assert.equal(payload.score, payload.final_score)
+  assert.equal(payload.action, decisionOf(result.payload).action)
+  assert.equal(payload.category, decisionOf(result.payload).category)
+  assert.equal(payload.risk_level, decisionOf(result.payload).risk_level)
+  assert.equal(payload.decision_source, decisionOf(result.payload).decision_source)
+  assert.equal(typeof payload.processing_time_ms, "number")
+  assert.equal(typeof payload.d1_reads_estimate, "number")
+  assert.ok(payload.d1_reads_estimate >= 0)
 })
 
 test("sms analysis persistence is scheduled with waitUntil", async () => {
