@@ -109,6 +109,13 @@ class MockD1 {
       return { results: this.options.brandRegistryRows || [] }
     }
 
+    if (normalized.includes("FROM feedback_entity_aggregates")) {
+      if (this.options.feedbackEntityAggregateThrows) {
+        throw new Error("feedback entity aggregate unavailable")
+      }
+      return { results: this.options.feedbackEntityAggregateRows || [] }
+    }
+
     return { results: [] }
   }
 
@@ -937,6 +944,116 @@ test("conflicting iOS feedback is neutral", async () => {
   assert.deepEqual(Array.from(result.reasons), [])
 })
 
+test("domain feedback fraud x2 adds USER_CONFIRMED_SCAM", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 2,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Votre document est disponible ici https://example.com/document",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("USER_CONFIRMED_SCAM"))
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM feedback_entity_aggregates")))
+})
+
+test("single domain fraud feedback does not affect scoring", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 1,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        source_count: 1,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Votre document est disponible ici https://example.com/document",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("USER_CONFIRMED_SCAM"))
+})
+
+test("domain feedback safe x2 adds USER_CONFIRMED_SAFE", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 2,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Votre document est disponible ici https://example.com/document",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("USER_CONFIRMED_SAFE"))
+  assert.equal(decisionOf(result.payload).action, "allow")
+})
+
+test("domain feedback safe cannot neutralize malicious domain", async () => {
+  const env = makeEnv({
+    trustedDomainRows: [
+      trustedDomainRow("secure-login-verif.xyz", {
+        brand_key: "",
+        status: "fraud",
+        trust_level: "low",
+        trust_score: 0,
+      }),
+    ],
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 2,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Urgent: votre compte est suspendu. Validez ici https://secure-login-verif.xyz",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(decisionOf(result.payload).category, "fraud")
+  assert.equal(decisionOf(result.payload).action, "block")
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_MALICIOUS_DOMAIN"))
+  assert.ok(!reasonsOf(result.payload).includes("USER_CONFIRMED_SAFE"))
+})
+
+test("feedback entity aggregate lookup errors preserve analysis JSON", async () => {
+  const env = makeEnv({ feedbackEntityAggregateThrows: true })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Votre document est disponible ici https://example.com/document",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("USER_CONFIRMED_SCAM"))
+  assert.ok(!reasonsOf(result.payload).includes("USER_CONFIRMED_SAFE"))
+})
+
 test("SMS report with domain writes feedback entity aggregates", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/sms/report", {
@@ -1032,10 +1149,10 @@ test("feedback entity aggregate D1 errors do not break SMS report JSON", async (
   assert.equal(feedbackEntityAggregateRuns(env).length, 3)
 })
 
-test("SMS analysis does not read feedback entity aggregates yet", async () => {
+test("SMS analysis without URL does not read feedback entity aggregates", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/ai/sms/analyze", {
-    message: "Consultez votre dossier sur https://example.com",
+    message: "Bonjour, votre rendez-vous est confirme demain a 14h.",
   })
 
   assert.equal(result.status, 200)

@@ -1019,6 +1019,84 @@ async function analyzeLocalFrequencySignals(env, number, normalizedMessage) {
   }
 }
 
+async function analyzeFeedbackEntitySignals(env, domains = []) {
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))]
+  if (!env?.DB || normalizedDomains.length === 0) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const roots = [...new Set(normalizedDomains.map(rootDomainFromHost).filter(Boolean))]
+    const whereParts = []
+    const bindValues = []
+
+    if (normalizedDomains.length > 0) {
+      whereParts.push(`(entity_type = 'domain' AND entity_value IN (${normalizedDomains.map(() => "?").join(",")}))`)
+      bindValues.push(...normalizedDomains)
+    }
+
+    if (roots.length > 0) {
+      whereParts.push(`(entity_type = 'root_domain' AND entity_value IN (${roots.map(() => "?").join(",")}))`)
+      bindValues.push(...roots)
+    }
+
+    if (whereParts.length === 0) return { score: 0, reasons: [] }
+
+    const rows = await env.DB.prepare(`
+      SELECT
+        fraud_count,
+        spam_count,
+        telemarketing_count,
+        safe_count,
+        source_count,
+        controversy_score
+      FROM feedback_entity_aggregates
+      WHERE ${whereParts.join(" OR ")}
+    `)
+      .bind(...bindValues)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let fraudCount = 0
+    let spamCount = 0
+    let telemarketingCount = 0
+    let safeCount = 0
+    let sourceCount = 0
+    let controversyScore = 0
+
+    for (const row of results) {
+      fraudCount = Math.max(fraudCount, Number(row?.fraud_count || 0))
+      spamCount = Math.max(spamCount, Number(row?.spam_count || 0))
+      telemarketingCount = Math.max(telemarketingCount, Number(row?.telemarketing_count || 0))
+      safeCount = Math.max(safeCount, Number(row?.safe_count || 0))
+      sourceCount = Math.max(sourceCount, Number(row?.source_count || 0))
+      controversyScore = Math.max(controversyScore, Number(row?.controversy_score || 0))
+    }
+
+    const positiveCount = fraudCount + spamCount + telemarketingCount
+    if (fraudCount >= 2 && safeCount === 0 && controversyScore === 0) {
+      return { score: 20, reasons: ["USER_CONFIRMED_SCAM"] }
+    }
+
+    if (safeCount >= 2 && positiveCount === 0 && sourceCount >= 2) {
+      return { score: -25, reasons: ["USER_CONFIRMED_SAFE"] }
+    }
+
+    return { score: 0, reasons: [] }
+  } catch (error) {
+    console.error("feedback_entity_aggregate_lookup_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
+function suppressSafeFeedbackEntityForCriticalReasons(signal, reasonCodes = []) {
+  const reasons = Array.isArray(signal?.reasons) ? signal.reasons : []
+  if (!reasons.includes("USER_CONFIRMED_SAFE")) return signal || { score: 0, reasons: [] }
+  if (!hasFraudCriticalReason(reasonCodes)) return signal
+
+  return { score: 0, reasons: [] }
+}
+
 function correlateSignals(signals) {
   let score = 0
   const reasons = []
@@ -3496,7 +3574,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const useLocalEnrichment = !trustedTransactional && suspiciousCore
   const clusterReadsEstimate = useLocalEnrichment && number ? 1 : 0
   const localGraphReadsEstimate = useLocalEnrichment && number ? 1 : 0
-  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate
+  const shouldLookupFeedbackEntityAggregates =
+    useLocalEnrichment &&
+    baseDomains.length > 0 &&
+    !baseDomainsTrusted &&
+    !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
+  const feedbackEntityReadsEstimate = shouldLookupFeedbackEntityAggregates ? 1 : 0
+  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate + feedbackEntityReadsEstimate
 
   const [
     domainRisk,
@@ -3506,6 +3590,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     campaign,
     globalGraph,
     localGraph,
+    rawFeedbackEntity,
   ] = await Promise.all([
     usedDomainAge ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
     useLocalEnrichment ? analyzeNumberCluster(env, number) : Promise.resolve({ score: 0, reasons: [] }),
@@ -3518,6 +3603,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
         ? buildLocalThreatGraph(env, number, normalizedMessage)
         : Promise.resolve(localGraphFromFrequency)
       : Promise.resolve({ score: 0, reasons: [] }),
+    shouldLookupFeedbackEntityAggregates ? analyzeFeedbackEntitySignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
   ])
 
   const correlation = correlateSignals({
@@ -3527,6 +3613,20 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     cluster: !trustedTransactional && cluster.score > 20,
     reputation: reputation.score > 30,
   })
+
+  const preFeedbackEntityReasons = [
+    ...fastDecision.heuristicReasons,
+    ...localFrequency.reasons,
+    ...domainRisk.reasons,
+    ...cluster.reasons,
+    ...campaign.reasons,
+    ...reputation.reasons,
+    ...carrier.reasons,
+    ...globalGraph.reasons,
+    ...localGraph.reasons,
+    ...correlation.reasons,
+  ]
+  const feedbackEntity = suppressSafeFeedbackEntityForCriticalReasons(rawFeedbackEntity, preFeedbackEntityReasons)
 
   const enrichedHeuristicScore = clampScore(
     fastDecision.heuristicScore +
@@ -3538,20 +3638,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     carrier.score +
     globalGraph.score +
     localGraph.score +
-    correlation.score
+    correlation.score +
+    feedbackEntity.score
   )
 
   const combinedReasons = [
-    ...fastDecision.heuristicReasons,
-    ...localFrequency.reasons,
-    ...domainRisk.reasons,
-    ...cluster.reasons,
-    ...campaign.reasons,
-    ...reputation.reasons,
-    ...carrier.reasons,
-    ...globalGraph.reasons,
-    ...localGraph.reasons,
-    ...correlation.reasons,
+    ...preFeedbackEntityReasons,
+    ...feedbackEntity.reasons,
   ]
 
 
