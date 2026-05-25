@@ -1436,6 +1436,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
       },
       body: JSON.stringify({
         model,
+        max_output_tokens: 120,
         ...(supportsOpenAIReasoning(model) ? { reasoning: { effort: "minimal" } } : {}),
         input: [
           {

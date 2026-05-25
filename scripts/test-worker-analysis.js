@@ -506,6 +506,7 @@ test("OpenAI request omits reasoning for non-reasoning models", async () => {
 
   assert.ok(result)
   assert.equal(requestBody.model, "gpt-4o-mini")
+  assert.equal(requestBody.max_output_tokens, 120)
   assert.equal(Object.hasOwn(requestBody, "reasoning"), false)
 })
 
