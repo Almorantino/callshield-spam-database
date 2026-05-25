@@ -1915,7 +1915,7 @@ async function buildFinalAnalysis(env, {
     "FAKE_AUTHORITY",
     "DELIVERY_SCAM",
     "JOB_SCAM",
-  ].includes(code))
+  ].includes(code)) || hasAccountThreat(originalText)
   const aiUnavailableOrLowSafe =
     aiScore === null ||
     (
@@ -3090,7 +3090,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
 
   const lowScoreNeedsAIReview = requiresAIReviewForLowScore(message, combinedReasons)
   const canUseSensitiveLowRiskFastWarn =
-    enrichedHeuristicScore <= 35 &&
+    enrichedHeuristicScore <= 49 &&
     lowScoreNeedsAIReview &&
     !appleFastBudget &&
     !baseHasUrl &&
@@ -3099,7 +3099,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     !baseHasShortener &&
     !trustedTransactional
 
-  if (enrichedHeuristicScore <= 35 && (!lowScoreNeedsAIReview || canUseSensitiveLowRiskFastWarn)) {
+  if ((enrichedHeuristicScore <= 35 && !lowScoreNeedsAIReview) || canUseSensitiveLowRiskFastWarn) {
     const lowRiskHeuristicScore = canUseSensitiveLowRiskFastWarn
       ? Math.max(enrichedHeuristicScore, 35)
       : enrichedHeuristicScore
