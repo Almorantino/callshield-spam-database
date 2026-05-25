@@ -1398,10 +1398,29 @@ function normalizeOpenAIAnalysisResult(value) {
   }
 }
 
+function logOpenAIAnalysis({
+  model,
+  timeoutMs,
+  outcome,
+  status = null,
+  durationMs = 0,
+}) {
+  console.log("openai_analysis", JSON.stringify({
+    model: String(model || ""),
+    timeout_ms: Math.max(0, Number(timeoutMs || 0)),
+    outcome: String(outcome || "unknown"),
+    status: status === null || status === undefined ? null : Number(status),
+    duration_ms: Math.max(0, Number(durationMs || 0)),
+  }))
+}
+
 async function callOpenAI(env, message, number, analysisContext = null) {
   if (!env.OPENAI_API_KEY) return null
 
   const context = compactAIAnalysisContext(analysisContext)
+  const model = env.OPENAI_MODEL || "gpt-5-mini"
+  const timeoutMs = openAIFetchTimeoutMs(env)
+  const startedAt = Date.now()
 
   try {
     const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
@@ -1411,7 +1430,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
         "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || "gpt-5-mini",
+        model,
         reasoning: { effort: "minimal" },
         input: [
           {
@@ -1486,9 +1505,18 @@ async function callOpenAI(env, message, number, analysisContext = null) {
           },
         },
       }),
-    }, openAIFetchTimeoutMs(env))
+    }, timeoutMs)
 
-    if (!response.ok) return null
+    if (!response.ok) {
+      logOpenAIAnalysis({
+        model,
+        timeoutMs,
+        outcome: "http_error",
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      })
+      return null
+    }
 
     const data = await response.json()
 
@@ -1499,7 +1527,15 @@ async function callOpenAI(env, message, number, analysisContext = null) {
         const contents = Array.isArray(item?.content) ? item.content : []
         for (const c of contents) {
           if (c?.json && typeof c.json === "object" && !Array.isArray(c.json)) {
-            return normalizeOpenAIAnalysisResult(c.json)
+            const normalized = normalizeOpenAIAnalysisResult(c.json)
+            logOpenAIAnalysis({
+              model,
+              timeoutMs,
+              outcome: normalized ? "success" : "invalid_json_object",
+              status: response.status,
+              durationMs: Date.now() - startedAt,
+            })
+            return normalized
           }
           const text = typeof c?.text === "string" ? c.text.trim() : ""
           if (text) {
@@ -1509,14 +1545,47 @@ async function callOpenAI(env, message, number, analysisContext = null) {
       }
     }
 
-    if (!raw) return null
+    if (!raw) {
+      logOpenAIAnalysis({
+        model,
+        timeoutMs,
+        outcome: "empty_output",
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      })
+      return null
+    }
 
     const parsed = JSON.parse(raw)
 
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      logOpenAIAnalysis({
+        model,
+        timeoutMs,
+        outcome: "invalid_json_root",
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      })
+      return null
+    }
 
-    return normalizeOpenAIAnalysisResult(parsed)
+    const normalized = normalizeOpenAIAnalysisResult(parsed)
+    logOpenAIAnalysis({
+      model,
+      timeoutMs,
+      outcome: normalized ? "success" : "invalid_json_object",
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+    })
+    return normalized
   } catch {
+    logOpenAIAnalysis({
+      model,
+      timeoutMs,
+      outcome: "error",
+      status: null,
+      durationMs: Date.now() - startedAt,
+    })
     return null
   }
 }
