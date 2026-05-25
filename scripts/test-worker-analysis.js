@@ -131,6 +131,13 @@ class MockD1 {
       return { results: this.options.feedbackEntityAggregateRows || [] }
     }
 
+    if (normalized.includes("FROM external_url_evidence_aggregates")) {
+      if (this.options.externalUrlEvidenceThrows) {
+        throw new Error("external URL evidence unavailable")
+      }
+      return { results: this.options.externalUrlEvidenceRows || [] }
+    }
+
     return { results: [] }
   }
 
@@ -276,6 +283,20 @@ function brandRegistryRow(brandKey, officialDomains) {
     official_domains: Array.isArray(officialDomains)
       ? JSON.stringify(officialDomains)
       : String(officialDomains || ""),
+  }
+}
+
+function externalUrlEvidenceRow(entityType, entityValue, overrides = {}) {
+  return {
+    entity_type: entityType,
+    entity_value: entityValue,
+    phishing_count: overrides.phishing_count ?? 1,
+    malware_count: overrides.malware_count ?? 0,
+    smishing_count: overrides.smishing_count ?? 0,
+    official_ioc_count: overrides.official_ioc_count ?? 0,
+    source_count: overrides.source_count ?? 1,
+    evidence_count: overrides.evidence_count ?? 1,
+    max_confidence: overrides.max_confidence ?? 0.6,
   }
 }
 
@@ -529,6 +550,7 @@ test("trusted La Poste tracking link skips OpenAI", async () => {
   assert.ok(scoreOf(result.payload) <= 8)
   assert.equal(payload.path, "trusted_domain_fast_allow")
   assert.equal(payload.used_ai, false)
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM external_url_evidence_aggregates")))
 })
 
 test("mixed trusted and unknown domains still reaches AI window", async () => {
@@ -923,6 +945,72 @@ test("ambiguous URL still reaches AI window", async () => {
   assert.equal(fetchCalls, 1)
   assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
   assert.equal(decisionOf(result.payload).action, "warn")
+})
+
+test("external URL evidence exact domain adds limited reputation signal", async () => {
+  let fetchCalls = 0
+  const aiContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 0,
+        category: "safe",
+        reason_codes: [],
+        explanation: "safe",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({
+    openAIKey: "test-key",
+    externalUrlEvidenceRows: [
+      externalUrlEvidenceRow("domain", "neutraldocs.com", {
+        phishing_count: 1,
+        source_count: 1,
+        evidence_count: 1,
+        max_confidence: 0.6,
+      }),
+    ],
+  })
+  const signal = await context.analyzeExternalUrlEvidenceSignals(env, ["neutraldocs.com"])
+  assert.equal(signal.score, 5)
+  assert.deepEqual(Array.from(signal.reasons), ["BAD_REPUTATION"])
+
+  const result = await postJson(aiContext, env, "/ai/sms/analyze", {
+    message: "Voici la page publique demandee pour reference https://neutraldocs.com/document merci",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 1)
+  assert.ok(reasonsOf(result.payload).includes("BAD_REPUTATION"))
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM external_url_evidence_aggregates")))
+})
+
+test("external URL evidence root domain requires corroboration", async () => {
+  const env = makeEnv({
+    externalUrlEvidenceRows: [
+      externalUrlEvidenceRow("root_domain", "neutraldocs.com", {
+        phishing_count: 1,
+        source_count: 1,
+        evidence_count: 1,
+        max_confidence: 0.6,
+      }),
+    ],
+  })
+  const result = await context.analyzeExternalUrlEvidenceSignals(env, ["sub.neutraldocs.com"])
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("external URL evidence D1 errors are neutral", async () => {
+  const env = makeEnv({ externalUrlEvidenceThrows: true })
+  const result = await context.analyzeExternalUrlEvidenceSignals(env, ["neutraldocs.com"])
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
 })
 
 test("frequency counters preserve derived campaign and local graph scoring", async () => {

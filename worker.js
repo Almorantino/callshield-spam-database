@@ -1089,6 +1089,90 @@ async function analyzeFeedbackEntitySignals(env, domains = []) {
   }
 }
 
+async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))].slice(0, 10)
+  if (!env?.DB || normalizedDomains.length === 0) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const roots = [...new Set(normalizedDomains.map(rootDomainFromHost).filter(Boolean))].slice(0, 10)
+    const whereParts = []
+    const bindValues = []
+
+    if (normalizedDomains.length > 0) {
+      whereParts.push(`(entity_type = 'domain' AND entity_value IN (${normalizedDomains.map(() => "?").join(",")}))`)
+      bindValues.push(...normalizedDomains)
+    }
+
+    if (roots.length > 0) {
+      whereParts.push(`(entity_type = 'root_domain' AND entity_value IN (${roots.map(() => "?").join(",")}))`)
+      bindValues.push(...roots)
+    }
+
+    if (whereParts.length === 0) return { score: 0, reasons: [] }
+
+    const rows = await env.DB.prepare(`
+      SELECT
+        entity_type,
+        entity_value,
+        phishing_count,
+        malware_count,
+        smishing_count,
+        official_ioc_count,
+        source_count,
+        evidence_count,
+        max_confidence
+      FROM external_url_evidence_aggregates
+      WHERE ${whereParts.join(" OR ")}
+    `)
+      .bind(...bindValues)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let score = 0
+
+    for (const row of results) {
+      const entityType = String(row?.entity_type || "")
+      const phishingCount = Number(row?.phishing_count || 0)
+      const malwareCount = Number(row?.malware_count || 0)
+      const smishingCount = Number(row?.smishing_count || 0)
+      const officialIocCount = Number(row?.official_ioc_count || 0)
+      const sourceCount = Number(row?.source_count || 0)
+      const evidenceCount = Number(row?.evidence_count || 0)
+      const maxConfidence = Number(row?.max_confidence || 0)
+      const riskCount = phishingCount + malwareCount + smishingCount + officialIocCount
+      if (riskCount <= 0) continue
+
+      if (entityType === "domain") {
+        if ((malwareCount > 0 || officialIocCount > 0) && maxConfidence >= 0.7) {
+          score = Math.max(score, 15)
+        } else if (sourceCount >= 2 && maxConfidence >= 0.6) {
+          score = Math.max(score, 15)
+        } else if (smishingCount > 0 && evidenceCount >= 2) {
+          score = Math.max(score, 10)
+        } else if (maxConfidence >= 0.55) {
+          score = Math.max(score, 5)
+        }
+      } else if (
+        entityType === "root_domain" &&
+        evidenceCount >= 3 &&
+        riskCount >= 3 &&
+        maxConfidence >= 0.55
+      ) {
+        score = Math.max(score, 5)
+      }
+    }
+
+    return score > 0
+      ? { score, reasons: ["BAD_REPUTATION"] }
+      : { score: 0, reasons: [] }
+  } catch (error) {
+    console.error("external_url_evidence_lookup_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
 function suppressSafeFeedbackEntityForCriticalReasons(signal, reasonCodes = []) {
   const reasons = Array.isArray(signal?.reasons) ? signal.reasons : []
   if (!reasons.includes("USER_CONFIRMED_SAFE")) return signal || { score: 0, reasons: [] }
@@ -2243,6 +2327,7 @@ async function buildFinalAnalysis(env, {
     "FAKE_AUTHORITY",
     "DELIVERY_SCAM",
     "JOB_SCAM",
+    "BAD_REPUTATION",
   ].includes(code)) || hasAccountThreat(originalText)
   const aiUnavailableOrLowSafe =
     aiScore === null ||
@@ -3797,8 +3882,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseDomains.length > 0 &&
     !baseDomainsTrusted &&
     !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
+  const shouldLookupExternalUrlEvidence =
+    baseDomains.length > 0 &&
+    !baseDomainsTrusted &&
+    !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
   const feedbackEntityReadsEstimate = shouldLookupFeedbackEntityAggregates ? 1 : 0
-  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate + feedbackEntityReadsEstimate
+  const externalUrlEvidenceReadsEstimate = shouldLookupExternalUrlEvidence ? 1 : 0
+  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate + feedbackEntityReadsEstimate + externalUrlEvidenceReadsEstimate
 
   const [
     domainRisk,
@@ -3809,6 +3899,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     globalGraph,
     localGraph,
     rawFeedbackEntity,
+    externalUrlEvidence,
   ] = await Promise.all([
     usedDomainAge ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
     useLocalEnrichment ? analyzeNumberCluster(env, number) : Promise.resolve({ score: 0, reasons: [] }),
@@ -3822,6 +3913,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
         : Promise.resolve(localGraphFromFrequency)
       : Promise.resolve({ score: 0, reasons: [] }),
     shouldLookupFeedbackEntityAggregates ? analyzeFeedbackEntitySignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
+    shouldLookupExternalUrlEvidence ? analyzeExternalUrlEvidenceSignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
   ])
 
   const correlation = correlateSignals({
@@ -3842,6 +3934,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     ...carrier.reasons,
     ...globalGraph.reasons,
     ...localGraph.reasons,
+    ...externalUrlEvidence.reasons,
     ...correlation.reasons,
   ]
   const feedbackEntity = suppressSafeFeedbackEntityForCriticalReasons(rawFeedbackEntity, preFeedbackEntityReasons)
@@ -3856,6 +3949,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     carrier.score +
     globalGraph.score +
     localGraph.score +
+    externalUrlEvidence.score +
     correlation.score +
     feedbackEntity.score
   )
