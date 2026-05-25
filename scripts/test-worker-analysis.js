@@ -1165,6 +1165,69 @@ test("business reputation candidate rows are neutral", async () => {
   assert.deepEqual(Array.from(result.reasons), [])
 })
 
+test("business reputation low-confidence corroboration is neutral", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "planet assurances", {
+        consumer_evidence_count: 2,
+        contested_evidence_count: 1,
+        max_confidence: 0.58,
+      }),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    [],
+    "",
+    "Planet Assurances vous contacte pour votre contrat assurance."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("business reputation single company-name evidence is neutral", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "big yipsylon", {
+        consumer_evidence_count: 1,
+        contested_evidence_count: 0,
+        max_confidence: 0.68,
+      }),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    [],
+    "",
+    "Big Yipsylon vous propose un economiseur electricite."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("business reputation single domain evidence is neutral", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("domain", "flandrin-assurances.fr", {
+        consumer_evidence_count: 1,
+        contested_evidence_count: 0,
+        max_confidence: 0.66,
+      }),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    ["flandrin-assurances.fr"],
+    "",
+    "Flandrin Assurances vous contacte au sujet de votre prime energie."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
 test("business reputation D1 errors are neutral", async () => {
   const env = makeEnv({ businessReputationThrows: true })
   const result = await context.analyzeBusinessReputationSignals(
