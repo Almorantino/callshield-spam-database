@@ -84,6 +84,19 @@
       "status": "candidate"
     },
     {
+      "company_name": "B.Y BIG YIPSYLON",
+      "siren": "894765288",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "gerant",
+      "activity_hint": "Distribution de produits aux particuliers ; protection juridique et assurances",
+      "risk_tags": ["energy", "insurance_finance", "remote_sales", "telemarketing", "subscription_or_sepa_risk"],
+      "candidate_reason": "Pappers lists distribution-to-consumer activity with protection juridique and insurance-related products.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/entreprise/by-big-yipsylon-894765288",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
       "company_name": "LA COMPAGNIE DES ASSURANCES",
       "siren": "801308024",
       "person_key": "yony_sitbon_1982_09",
@@ -93,7 +106,7 @@
       "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
       "runtime_scoring_allowed": false,
       "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
-      "domains": [],
+      "domains": ["lacompagniedesassurances.fr"],
       "status": "candidate"
     },
     {
@@ -106,7 +119,7 @@
       "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
       "runtime_scoring_allowed": false,
       "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
-      "domains": [],
+      "domains": ["cdadeveloppement.fr"],
       "status": "candidate"
     },
     {
@@ -119,7 +132,7 @@
       "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
       "runtime_scoring_allowed": false,
       "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
-      "domains": [],
+      "domains": ["flandrin-assurances.fr"],
       "status": "candidate"
     },
     {
@@ -263,6 +276,19 @@
       "runtime_scoring_allowed": false,
       "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
       "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "METEORE",
+      "siren": "841519739",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "ancien_president",
+      "activity_hint": "Courtier d'assurance / produits energie et assistance",
+      "risk_tags": ["energy", "insurance_finance", "remote_sales"],
+      "candidate_reason": "Pappers lists historical management links and insurance activity; candidate only until consumer evidence is corroborated.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/entreprise/meteore-841519739",
+      "domains": ["meteore.fr", "meteore.gerermesdomaines.com"],
       "status": "candidate"
     },
     {
@@ -455,6 +481,232 @@
       "contested": false,
       "allowed_usage": "business_reputation_evidence",
       "notes": "Consumer complaints around energy prime/refund and monthly contract/subscription patterns."
+    },
+    {
+      "source_id": "signal_arnaques_la_compagnie_assurances_208706",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/208706",
+      "evidence_type": "consumer_report_thread",
+      "linked_companies": [
+        "801308024",
+        "833786908"
+      ],
+      "linked_numbers": [
+        "+33178744569",
+        "+33988290071",
+        "+33360076063",
+        "+33325939696",
+        "+33360076065",
+        "+33411773127",
+        "+33411773280",
+        "+33411773283"
+      ],
+      "observed_patterns": [
+        "energy_saving_device",
+        "energy_refund_prime",
+        "identity_collection",
+        "iban_collection",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.72,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report thread mentioning La Compagnie des Assurances / CDA Developpement around eco-energy kit, CEE or prime patterns, RIB/IBAN collection and repeated caller numbers."
+    },
+    {
+      "source_id": "lettre_resiliation_cda_developpement",
+      "source_name": "Lettre-Resiliation.com",
+      "source_url": "https://www.lettre-resiliation.com/guides/assurance/resiliation-cda-developpement.html",
+      "evidence_type": "consumer_resiliation_guide",
+      "linked_companies": [
+        "833786908",
+        "801308024"
+      ],
+      "observed_patterns": [
+        "operator_impersonation_claim",
+        "subscription_or_sepa_risk",
+        "insurance_finance",
+        "telemarketing"
+      ],
+      "confidence_score": 0.68,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer cancellation guide warning about CDA Developpement / La Compagnie des Assurances subscription context and operator-impersonation style claims."
+    },
+    {
+      "source_id": "warning_trading_cda_developpement_tingis_2024",
+      "source_name": "Warning Trading",
+      "source_url": "https://warning-trading.com/arnaque/cda-developpement-tingis-assistelec-avis-yony-sitbon/",
+      "evidence_type": "consumer_investigation_article",
+      "linked_companies": [
+        "833786908",
+        "801308024",
+        "934042581"
+      ],
+      "linked_domains": [
+        "cdadeveloppement.fr",
+        "lacompagniedesassurances.fr",
+        "assistelec.fr"
+      ],
+      "observed_patterns": [
+        "energy_refund_prime",
+        "iban_collection",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.62,
+      "contested": true,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Investigation article with allegations and contestable framing. Use only as corroborating weighted evidence."
+    },
+    {
+      "source_id": "resilier_cda_iag_contract_network",
+      "source_name": "Resilier.fr",
+      "source_url": "https://www.resilier.fr/cda-developpement.php",
+      "evidence_type": "consumer_resiliation_guide",
+      "linked_companies": [
+        "833786908",
+        "512099151",
+        "534807888",
+        "752374223",
+        "808394936",
+        "808353346"
+      ],
+      "linked_domains": [
+        "cdadeveloppement.fr"
+      ],
+      "observed_patterns": [
+        "subscription_or_sepa_risk",
+        "tacit_renewal_contract",
+        "insurance_finance",
+        "remote_sales"
+      ],
+      "confidence_score": 0.55,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer cancellation guide mapping CDA Developpement/IAG products and related entities. Below Worker scoring threshold alone."
+    },
+    {
+      "source_id": "trustpilot_flandrin_assurances_reviews",
+      "source_name": "Trustpilot",
+      "source_url": "https://fr.trustpilot.com/review/flandrin-assurances.fr",
+      "evidence_type": "consumer_reviews_page",
+      "linked_companies": [
+        "808353346"
+      ],
+      "linked_domains": [
+        "flandrin-assurances.fr"
+      ],
+      "observed_patterns": [
+        "energy_refund_prime",
+        "iban_collection",
+        "telemarketing",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.66,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer review page mentioning Flandrin Assurances and recurring complaints around energy-prime, IBAN or subscription patterns."
+    },
+    {
+      "source_id": "fsma_settlement_gestion_iag_flandrin_2025",
+      "source_name": "FSMA",
+      "source_url": "https://www.fsma.be/fr/news/reglement-transactionnel-avec-gestion-inter-assurances-groupe-sas-flandrin-assurances-sas-et",
+      "evidence_type": "regulatory_settlement",
+      "linked_companies": [
+        "512099151",
+        "808353346"
+      ],
+      "observed_patterns": [
+        "regulated_insurance_distribution_issue",
+        "insurance_finance"
+      ],
+      "confidence_score": 0.82,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Official FSMA settlement involving Gestion Inter Assurances Groupe and Flandrin Assurances. Regulatory evidence, not a direct scam verdict."
+    },
+    {
+      "source_id": "warning_trading_rodin_iag_atid_2026",
+      "source_name": "Warning Trading",
+      "source_url": "https://warning-trading.com/enquetes-et-decryptages/rodin-iag-atid/",
+      "evidence_type": "consumer_investigation_article",
+      "linked_companies": [
+        "921228797",
+        "808394936",
+        "808353346",
+        "522965946",
+        "512099151",
+        "841519739"
+      ],
+      "observed_patterns": [
+        "insurance_finance",
+        "telemarketing",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.58,
+      "contested": true,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Investigation article mapping insurance-network allegations. Contested source; use only as low-weight corroborating evidence."
+    },
+    {
+      "source_id": "signal_arnaques_vee_740200",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/740200",
+      "evidence_type": "consumer_report",
+      "linked_companies": [
+        "880422522"
+      ],
+      "linked_numbers": [
+        "+33162241256"
+      ],
+      "observed_patterns": [
+        "insurance_finance",
+        "telemarketing",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.68,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report mentioning SAS VEE and a caller number in an insurance/subscription context."
+    },
+    {
+      "source_id": "adc_france_vee_2024",
+      "source_name": "ADC France",
+      "source_url": "https://adcfrance.fr/wp-content/uploads/2024/10/PUBLICATION-DE-LA-SAS-VEE.pdf",
+      "evidence_type": "consumer_association_report",
+      "linked_companies": [
+        "880422522"
+      ],
+      "observed_patterns": [
+        "insurance_finance",
+        "telemarketing",
+        "consumer_complaint"
+      ],
+      "confidence_score": 0.68,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer association publication about SAS VEE. Use as weighted evidence only."
+    },
+    {
+      "source_id": "adc_france_big_yipsylon_2022",
+      "source_name": "ADC France",
+      "source_url": "https://adcfrance.fr/wp-content/uploads/2022/08/Leconomiseur-delectricite-de-BIG-YIPSYLON.pdf",
+      "evidence_type": "consumer_association_report",
+      "linked_companies": [
+        "894765288"
+      ],
+      "observed_patterns": [
+        "energy_saving_device",
+        "remote_sales",
+        "subscription_or_sepa_risk",
+        "consumer_complaint"
+      ],
+      "confidence_score": 0.68,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer association publication about the Big Yipsylon electricity-saving product. Use as weighted evidence only."
     }
   ]
 }

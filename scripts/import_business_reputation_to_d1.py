@@ -116,6 +116,7 @@ def empty_aggregate(entity_type: str, entity_value: str) -> dict:
     "risk_tags": set(),
     "observed_patterns": set(),
     "sources": set(),
+    "consumer_source_ids": set(),
     "corporate_source_count": 0,
     "consumer_evidence_count": 0,
     "contested_evidence_count": 0,
@@ -188,17 +189,20 @@ def add_consumer_evidence(
     add_company_context(row, company)
 
   source_id = str(evidence.get("source_id") or evidence.get("source_name") or "").strip()
+  is_new_consumer_source = not source_id or source_id not in row["consumer_source_ids"]
   if source_id:
     row["sources"].add(source_id)
-  row["consumer_evidence_count"] += 1
-  if evidence.get("contested"):
-    row["contested_evidence_count"] += 1
-  confidence = float(evidence.get("confidence_score") or 0.0)
-  row["max_confidence"] = max(float(row["max_confidence"]), confidence)
-  row["confidence_sum"] += confidence
-  row["observed_patterns"].update(as_clean_list(evidence.get("observed_patterns")))
-  row["domains"].update(as_clean_list(evidence.get("domains")))
-  row["phone_numbers"].update(as_clean_list(evidence.get("phone_numbers")))
+    row["consumer_source_ids"].add(source_id)
+  if is_new_consumer_source:
+    row["consumer_evidence_count"] += 1
+    if evidence.get("contested"):
+      row["contested_evidence_count"] += 1
+    confidence = float(evidence.get("confidence_score") or 0.0)
+    row["max_confidence"] = max(float(row["max_confidence"]), confidence)
+    row["confidence_sum"] += confidence
+    row["observed_patterns"].update(as_clean_list(evidence.get("observed_patterns")))
+    row["domains"].update(as_clean_list(evidence.get("domains")))
+    row["phone_numbers"].update(as_clean_list(evidence.get("phone_numbers")))
   row["status"] = "evidence_confirmed"
   add_seen(row, generated_at)
 
