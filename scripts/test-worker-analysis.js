@@ -98,6 +98,13 @@ class MockD1 {
       return { results: this.options.trustedDomainRows || [] }
     }
 
+    if (normalized.includes("FROM brand_registry")) {
+      if (this.options.brandRegistryThrows) {
+        throw new Error("brand registry unavailable")
+      }
+      return { results: this.options.brandRegistryRows || [] }
+    }
+
     return { results: [] }
   }
 
@@ -234,6 +241,15 @@ function trustedDomainRow(domain, overrides = {}) {
     trust_score: overrides.trust_score ?? 100,
     trust_level: overrides.trust_level || "verified",
     status: overrides.status || "active",
+  }
+}
+
+function brandRegistryRow(brandKey, officialDomains) {
+  return {
+    brand_key: brandKey,
+    official_domains: Array.isArray(officialDomains)
+      ? JSON.stringify(officialDomains)
+      : String(officialDomains || ""),
   }
 }
 
@@ -501,6 +517,80 @@ test("mixed trusted and unknown domains still reaches AI window", async () => {
   assert.equal(fetchCalls, 1)
   assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
   assert.equal(decisionOf(result.payload).action, "warn")
+})
+
+test("brand registry official Google domain is not marked as brand spoof", async () => {
+  const env = makeEnv({
+    brandRegistryRows: [
+      brandRegistryRow("google", ["google.com", "accounts.google.com"]),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Google verifiez votre compte: https://google.com/security",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("BRAND_SPOOF"))
+  assert.ok(!reasonsOf(result.payload).includes("SPOOFING"))
+  assert.ok(!reasonsOf(result.payload).includes("TRUSTED_DOMAIN"))
+})
+
+test("brand registry unknown Google-like domain keeps brand spoof", async () => {
+  const env = makeEnv({
+    brandRegistryRows: [
+      brandRegistryRow("google", ["google.com", "accounts.google.com"]),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Google verification requise: https://google-security.xyz",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("BRAND_SPOOF"))
+})
+
+test("brand registry official Chronopost domain is not spoof without trusted domain", async () => {
+  const env = makeEnv({
+    brandRegistryRows: [
+      brandRegistryRow("chronopost", ["chronopost.fr"]),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Chronopost: suivez votre colis https://chronopost.fr/suivi",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("BRAND_SPOOF"))
+  assert.ok(!reasonsOf(result.payload).includes("SPOOFING"))
+  assert.ok(!reasonsOf(result.payload).includes("TRUSTED_DOMAIN"))
+})
+
+test("brand registry legacy official_domains format is parsed", async () => {
+  const env = makeEnv({
+    brandRegistryRows: [
+      brandRegistryRow("laposte", "[laposte.fr,www.laposte.fr]"),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "La Poste: suivez votre colis https://laposte.fr/suivi",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("BRAND_SPOOF"))
+  assert.ok(!reasonsOf(result.payload).includes("SPOOFING"))
+  assert.ok(!reasonsOf(result.payload).includes("TRUSTED_DOMAIN"))
+})
+
+test("brand registry unavailable preserves current spoof fallback", async () => {
+  const env = makeEnv({
+    brandRegistryThrows: true,
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Google verifiez votre compte: https://google.com/security",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("SPOOFING"))
 })
 
 test("fraud trusted_domains row produces malicious-domain signal", async () => {

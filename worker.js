@@ -189,6 +189,166 @@ function areDomainsTrusted(domains = [], trustContext = null) {
   return normalizedDomains.every((domain) => isDomainTrusted(domain, trustContext))
 }
 
+function normalizeBrandComparable(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "")
+}
+
+function parseOfficialDomains(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(normalizeDomainValue).filter(Boolean))]
+  }
+
+  const raw = String(value || "").trim()
+  if (!raw) return []
+
+  let values = []
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        values = parsed
+      }
+    } catch {
+      values = raw
+        .replace(/^\[/, "")
+        .replace(/\]$/, "")
+        .split(",")
+    }
+  } else {
+    values = raw.split(",")
+  }
+
+  return [...new Set(values
+    .map((item) => String(item || "").trim().replace(/^['"]|['"]$/g, ""))
+    .map(normalizeDomainValue)
+    .filter(Boolean))]
+}
+
+function buildBrandRegistryContext(rows = [], text = "") {
+  const normalizedText = normalizeBrandComparable(text)
+  const brands = []
+  const mentionedBrands = []
+
+  for (const row of rows || []) {
+    const brandKey = String(row?.brand_key || "").trim().toLowerCase()
+    const normalizedBrandKey = normalizeBrandComparable(brandKey)
+    if (!brandKey || !normalizedBrandKey) continue
+
+    const officialDomains = parseOfficialDomains(row?.official_domains)
+    const officialRootDomains = [...new Set(officialDomains.map(rootDomainFromHost).filter(Boolean))]
+    const brand = {
+      brandKey,
+      normalizedBrandKey,
+      officialDomains,
+      officialRootDomains,
+    }
+    brands.push(brand)
+
+    if (normalizedText.includes(normalizedBrandKey)) {
+      mentionedBrands.push(brand)
+    }
+  }
+
+  return {
+    hasData: brands.length > 0,
+    brands,
+    mentionedBrands,
+    mentionedBrandKeys: mentionedBrands.map((brand) => brand.brandKey),
+  }
+}
+
+function isBrandRegistryContextUsable(brandContext) {
+  return Boolean(brandContext?.hasData && Array.isArray(brandContext.mentionedBrands))
+}
+
+function isDomainOfficialForBrand(domain, brand) {
+  const normalizedDomain = normalizeDomainValue(domain)
+  if (!normalizedDomain || !brand) return false
+
+  const officialDomains = new Set((brand.officialDomains || []).map(normalizeDomainValue).filter(Boolean))
+  const officialRootDomains = new Set((brand.officialRootDomains || []).map(normalizeDomainValue).filter(Boolean))
+  const root = rootDomainFromHost(normalizedDomain)
+
+  return officialDomains.has(normalizedDomain) || officialRootDomains.has(root)
+}
+
+function areDomainsOfficialForMentionedBrand(domains = [], brandContext = null) {
+  if (!isBrandRegistryContextUsable(brandContext) || brandContext.mentionedBrands.length === 0) return false
+
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))]
+  if (normalizedDomains.length === 0) return false
+
+  return normalizedDomains.every((domain) =>
+    brandContext.mentionedBrands.some((brand) => isDomainOfficialForBrand(domain, brand))
+  )
+}
+
+async function lookupBrandRegistry(env, text = "", domains = []) {
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))]
+  if (!env?.DB || normalizedDomains.length === 0) {
+    return buildBrandRegistryContext([], text)
+  }
+
+  try {
+    const rows = await env.DB.prepare(`
+      SELECT brand_key, official_domains
+      FROM brand_registry
+    `).all()
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    return buildBrandRegistryContext(results, text)
+  } catch (error) {
+    console.error("brand_registry_lookup_failed", error)
+    return buildBrandRegistryContext([], text)
+  }
+}
+
+function adjustHeuristicForOfficialBrandDomains(heuristic, domains = [], brandContext = null) {
+  if (!areDomainsOfficialForMentionedBrand(domains, brandContext)) return heuristic
+
+  const reasonCodes = Array.isArray(heuristic?.reasonCodes) ? heuristic.reasonCodes : []
+  let score = Number(heuristic?.score || 0)
+  let removedScore = 0
+  const filteredReasons = reasonCodes.filter((code) => {
+    if (code === "SPOOFING") {
+      removedScore += 20
+      return false
+    }
+    if (code === "BRAND_SPOOF") {
+      removedScore += 35
+      return false
+    }
+    return true
+  })
+
+  if (filteredReasons.length === reasonCodes.length) return heuristic
+
+  return {
+    score: clampScore(score - removedScore),
+    reasonCodes: uniqueReasonCodes(filteredReasons),
+  }
+}
+
+function analyzeBrandRegistrySpoof(text, domains = [], domainsTrusted = false, brandContext = null) {
+  if (domainsTrusted || !isBrandRegistryContextUsable(brandContext) || brandContext.mentionedBrands.length === 0) {
+    return { score: 0, reasons: [] }
+  }
+
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))]
+  if (normalizedDomains.length === 0) return { score: 0, reasons: [] }
+
+  const hasUnofficialBrandDomain = normalizedDomains.some((domain) =>
+    !brandContext.mentionedBrands.some((brand) => isDomainOfficialForBrand(domain, brand))
+  )
+
+  if (!hasUnofficialBrandDomain) return { score: 0, reasons: [] }
+
+  return { score: 35, reasons: ["BRAND_SPOOF"] }
+}
+
 function isDomainKnownFraud(domain, trustContext = null) {
   if (!trustContext) return false
 
@@ -223,7 +383,7 @@ function containsUrgency(text) {
   return /\b(urgent|urgence|immédiatement|immediatement|dernier rappel|final notice|immédiat|immediat|sous 24h|sous 48h|action requise|compte suspendu|suspendu)\b/i.test(text)
 }
 
-function containsSpoofing(text, domains = [], domainsTrustedInput = null) {
+function containsSpoofing(text, domains = [], domainsTrustedInput = null, brandContext = null) {
   const lower = String(text || "").toLowerCase()
 
   const domainsTrusted = domainsTrustedInput === true
@@ -232,15 +392,23 @@ function containsSpoofing(text, domains = [], domainsTrustedInput = null) {
   const actionPattern = /\b(confirmez?|validez?|v[ée]rifiez?|mettez?\s+[àa]\s+jour|paiement|payer|login|identifiant|mot de passe|code secret|iban|cb|carte bancaire|identit[ée]|informations?)\b/i
   const urgencyPattern = /\b(urgent|urgence|immédiatement|immediatement|dernier rappel|final notice|immédiat|immediat|sous 24h|sous 48h|action requise|compte suspendu|suspendu)\b/i
 
+  const hasSuspiciousContext =
+    actionPattern.test(lower) ||
+    urgencyPattern.test(lower) ||
+    /\b(colis|livraison|suivi)\b/i.test(lower)
+
+  if (
+    hasSuspiciousContext &&
+    isBrandRegistryContextUsable(brandContext) &&
+    brandContext.mentionedBrands.length > 0
+  ) {
+    return !areDomainsOfficialForMentionedBrand(domains, brandContext)
+  }
+
   const knownBrands = ["amazon", "paypal", "google", "apple", "vinted", "laposte", "orange", "sfr", "free", "bouygues"]
 
   for (const brand of knownBrands) {
     if (!lower.includes(brand)) continue
-
-    const hasSuspiciousContext =
-      actionPattern.test(lower) ||
-      urgencyPattern.test(lower) ||
-      /\b(colis|livraison|suivi)\b/i.test(lower)
 
     if (hasSuspiciousContext) {
       return true
@@ -1613,6 +1781,7 @@ function buildCanonicalAnalysis({
   trustContext = null,
   precomputedDomains = null,
   precomputedTrustContext = null,
+  precomputedBrandContext = null,
 }) {
   const rawText = String(sourceMessage || "")
   const normalizedText = rawText.toLowerCase()
@@ -1647,7 +1816,9 @@ function buildCanonicalAnalysis({
   const hasOTP = containsOTP(rawText)
   const hasTracking = isLikelyTrackingMessage(rawText)
   const hasIdentity = /\b(identité|identite|iban|cb|carte bancaire|password|mot de passe|login|identifiant)\b/i.test(rawText)
-  const hasSpoof = domainsTrusted ? false : containsSpoofing(rawText, domains, domainsTrusted)
+  const hasSpoof = domainsTrusted
+    ? false
+    : (reasonCodes.includes("BRAND_SPOOF") || containsSpoofing(rawText, domains, domainsTrusted, precomputedBrandContext))
 
   return {
     schema_version: "v4",
@@ -1816,6 +1987,7 @@ async function buildFinalAnalysis(env, {
   sourceMessage,
   precomputedDomains = null,
   precomputedTrustContext = null,
+  precomputedBrandContext = null,
 }) {
   const aiScore = aiResult ? clampScore(aiResult.score) : null
   const aiReasons = Array.isArray(aiResult?.reason_codes) ? aiResult.reason_codes : []
@@ -1968,6 +2140,9 @@ async function buildFinalAnalysis(env, {
       model: "heuristic",
       modelVersion: "v1",
       trustContext,
+      precomputedDomains: allDomains,
+      precomputedTrustContext: trustContext,
+      precomputedBrandContext,
     })
   }
 
@@ -2107,6 +2282,9 @@ async function buildFinalAnalysis(env, {
       model: aiScore !== null ? "openai" : "heuristic",
       modelVersion: "v1",
       trustContext,
+      precomputedDomains: allDomains,
+      precomputedTrustContext: trustContext,
+      precomputedBrandContext,
     })
   }
 
@@ -2125,6 +2303,9 @@ async function buildFinalAnalysis(env, {
     model: aiScore !== null ? "openai" : "heuristic",
     modelVersion: "v1",
     trustContext,
+    precomputedDomains: allDomains,
+    precomputedTrustContext: trustContext,
+    precomputedBrandContext,
   })
 }
 
@@ -2921,16 +3102,38 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   let d1ReadsEstimate = baseDomains.length > 0 ? 1 : 0
   const baseTrustContext = await lookupTrustedDomains(env, baseDomains)
   const baseDomainReputation = analyzeDomainReputation(baseDomains, baseTrustContext)
+  const baseDomainsTrusted = areDomainsTrusted(baseDomains, baseTrustContext)
+  const shouldLookupBrandRegistry =
+    baseDomains.length > 0 &&
+    !baseDomainsTrusted &&
+    !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
+  if (shouldLookupBrandRegistry) {
+    d1ReadsEstimate += 1
+  }
+  const brandRegistryContext = shouldLookupBrandRegistry
+    ? await lookupBrandRegistry(env, message, baseDomains)
+    : buildBrandRegistryContext([], message)
+  const brandAdjustedHeuristic = adjustHeuristicForOfficialBrandDomains(
+    baseHeuristic,
+    baseDomains,
+    brandRegistryContext
+  )
+  const brandRegistrySpoof = analyzeBrandRegistrySpoof(
+    message,
+    baseDomains,
+    baseDomainsTrusted,
+    brandRegistryContext
+  )
   const baseHeuristicWithReputation = {
-    score: clampScore(baseHeuristic.score + baseDomainReputation.score),
+    score: clampScore(brandAdjustedHeuristic.score + baseDomainReputation.score + brandRegistrySpoof.score),
     reasonCodes: uniqueReasonCodes([
-      ...baseHeuristic.reasonCodes,
+      ...brandAdjustedHeuristic.reasonCodes,
       ...baseDomainReputation.reasons,
+      ...brandRegistrySpoof.reasons,
     ]),
   }
-  const baseDomainsTrusted = areDomainsTrusted(baseDomains, baseTrustContext)
-  const baseSpoof = containsSpoofing(message, baseDomains, baseDomainsTrusted)
-  const messageSpoof = baseSpoof
+  const baseSpoof = containsSpoofing(message, baseDomains, baseDomainsTrusted, brandRegistryContext)
+  const messageSpoof = baseSpoof || brandRegistrySpoof.reasons.includes("BRAND_SPOOF")
   const baseHasUrl = containsUrl(message)
   const baseHasUrgency = containsUrgency(message)
   const baseHasShortener = containsShortener(message)
@@ -2975,6 +3178,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       trustContext: null,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3050,6 +3254,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3192,6 +3397,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3248,6 +3454,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3307,6 +3514,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3368,6 +3576,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3442,6 +3651,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
@@ -3498,6 +3708,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
     })
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
