@@ -69,7 +69,11 @@ class MockD1Statement {
   }
 
   async run() {
-    this.db.runs.push({ sql: normalizeSql(this.sql), args: this.args })
+    const normalized = normalizeSql(this.sql)
+    this.db.runs.push({ sql: normalized, args: this.args })
+    if (this.db.options.feedbackEntityAggregateThrows && normalized.includes("feedback_entity_aggregates")) {
+      throw new Error("feedback entity aggregate unavailable")
+    }
     return { meta: { changes: 1 } }
   }
 }
@@ -263,6 +267,14 @@ function scoreOf(payload) {
 
 function reasonsOf(payload) {
   return decisionOf(payload).reason_codes || []
+}
+
+function feedbackEntityAggregateRuns(env) {
+  return env.__db.runs.filter((run) => run.sql.includes("feedback_entity_aggregates"))
+}
+
+function aggregateEntityKeys(env) {
+  return feedbackEntityAggregateRuns(env).map((run) => `${run.args[0]}:${run.args[1]}`)
 }
 
 const context = loadWorker(async () => {
@@ -923,6 +935,114 @@ test("conflicting iOS feedback is neutral", async () => {
 
   assert.equal(result.score, 0)
   assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("SMS report with domain writes feedback entity aggregates", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://secure-login-verif.xyz",
+    reported_at: 1774000000000,
+  })
+
+  const keys = aggregateEntityKeys(env)
+  const aggregateRuns = feedbackEntityAggregateRuns(env)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.domains_count, 1)
+  assert.ok(keys.includes("number:33699999999"))
+  assert.ok(keys.includes("domain:secure-login-verif.xyz"))
+  assert.ok(keys.includes("root_domain:secure-login-verif.xyz"))
+  assert.equal(aggregateRuns.length, 3)
+  assert.ok(aggregateRuns.every((run) => run.args[3] === 1))
+})
+
+test("SMS report without URL only aggregates the number entity", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 11 22 33 44",
+    message: "Signalement manuel sans lien",
+    reported_at: 1774000000000,
+  })
+
+  const keys = aggregateEntityKeys(env)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.domains_count, 0)
+  assert.deepEqual(keys, ["number:33611223344"])
+})
+
+test("legacy SMS feedback with URL aggregates number and domains", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/feedback", {
+    number: "+33 6 99 99 99 99",
+    message: "Urgent verifiez votre compte http://secure-login-verif.xyz",
+    user_feedback: "confirmed_scam",
+  })
+
+  const keys = aggregateEntityKeys(env)
+  const aggregateRuns = feedbackEntityAggregateRuns(env)
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.payload, { success: true })
+  assert.ok(keys.includes("number:33699999999"))
+  assert.ok(keys.includes("domain:secure-login-verif.xyz"))
+  assert.ok(keys.includes("root_domain:secure-login-verif.xyz"))
+  assert.equal(aggregateRuns.length, 3)
+  assert.ok(aggregateRuns.every((run) => run.args[2] === 1))
+})
+
+test("iOS feedback batch without message aggregates only the number", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/feedback", {
+    source: "ios",
+    events: [
+      {
+        event_id: "evt-1",
+        number_e164: "+33 1 62 30 41 80",
+        category: "spam",
+        created_at: 1774000000000,
+      },
+    ],
+  })
+
+  const aggregateRuns = feedbackEntityAggregateRuns(env)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.status, "ok")
+  assert.equal(result.payload.accepted, 1)
+  assert.equal(result.payload.inserted, 1)
+  assert.deepEqual(aggregateEntityKeys(env), ["number:33162304180"])
+  assert.equal(aggregateRuns[0].args[3], 1)
+})
+
+test("feedback entity aggregate D1 errors do not break SMS report JSON", async () => {
+  const env = makeEnv({ feedbackEntityAggregateThrows: true })
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://secure-login-verif.xyz",
+    reported_at: 1774000000000,
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.domains_count, 1)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 3)
+})
+
+test("SMS analysis does not read feedback entity aggregates yet", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Consultez votre dossier sur https://example.com",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(
+    env.__db.statements.some((sql) => sql.includes("feedback_entity_aggregates")),
+    false
+  )
 })
 
 test("live caller lookup with no match returns stable empty JSON", async () => {

@@ -2514,6 +2514,177 @@ async function ensureSMSReportsSchema(env) {
   return smsReportsSchemaReadyPromise
 }
 
+function aggregateTimestampSeconds(value) {
+  const timestamp = Number(value)
+  const fallback = Date.now()
+  const normalized = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallback
+  return Math.floor(normalized > 100000000000 ? normalized / 1000 : normalized)
+}
+
+function feedbackAggregateDeltas(category) {
+  const primaryCategory = canonicalCategory(category)
+  const deltas = {
+    fraud: 0,
+    spam: 0,
+    telemarketing: 0,
+    safe: 0,
+    unknown: 0,
+    positiveWeight: 0,
+    negativeWeight: 0,
+  }
+
+  switch (primaryCategory) {
+    case "fraud":
+      deltas.fraud = 1
+      deltas.positiveWeight = 3
+      break
+    case "spam":
+      deltas.spam = 1
+      deltas.positiveWeight = 1.5
+      break
+    case "telemarketing":
+      deltas.telemarketing = 1
+      deltas.positiveWeight = 2
+      break
+    case "safe":
+      deltas.safe = 1
+      deltas.negativeWeight = 3
+      break
+    default:
+      deltas.unknown = 1
+      break
+  }
+
+  return deltas
+}
+
+function feedbackEntitiesFromInputs({ number = "", message = "", sourceUrl = "" } = {}) {
+  const entities = []
+  const seen = new Set()
+  const addEntity = (entityType, entityValue) => {
+    const value = entityType === "number" ? normalizeNumber(entityValue) : normalizeDomainValue(entityValue)
+    if (!value) return
+
+    const key = `${entityType}:${value}`
+    if (seen.has(key)) return
+    seen.add(key)
+    entities.push({ entityType, entityValue: value })
+  }
+
+  addEntity("number", number)
+
+  const domains = collectMessageDomains(`${message || ""} ${sourceUrl || ""}`)
+  for (const domain of domains) {
+    const normalizedDomain = normalizeDomainValue(domain)
+    if (!normalizedDomain) continue
+
+    addEntity("domain", normalizedDomain)
+    addEntity("root_domain", rootDomainFromHost(normalizedDomain))
+  }
+
+  return entities
+}
+
+async function persistFeedbackEntityAggregate(env, entity, category, timestamp) {
+  if (!env?.DB || !entity?.entityType || !entity?.entityValue) return false
+
+  const deltas = feedbackAggregateDeltas(category)
+  const seenAt = aggregateTimestampSeconds(timestamp)
+  const updatedAt = Math.floor(Date.now() / 1000)
+
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO feedback_entity_aggregates (
+        entity_type,
+        entity_value,
+        fraud_count,
+        spam_count,
+        telemarketing_count,
+        safe_count,
+        unknown_count,
+        positive_weight,
+        negative_weight,
+        source_count,
+        controversy_score,
+        first_seen,
+        last_seen,
+        updated_at
+      ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 0, ?10, ?10, ?11
+      )
+      ON CONFLICT(entity_type, entity_value) DO UPDATE SET
+        fraud_count = fraud_count + excluded.fraud_count,
+        spam_count = spam_count + excluded.spam_count,
+        telemarketing_count = telemarketing_count + excluded.telemarketing_count,
+        safe_count = safe_count + excluded.safe_count,
+        unknown_count = unknown_count + excluded.unknown_count,
+        positive_weight = positive_weight + excluded.positive_weight,
+        negative_weight = negative_weight + excluded.negative_weight,
+        source_count = source_count + excluded.source_count,
+        controversy_score = controversy_score + CASE
+          WHEN excluded.safe_count > 0 AND (fraud_count + spam_count + telemarketing_count) > 0 THEN 1
+          WHEN (excluded.fraud_count + excluded.spam_count + excluded.telemarketing_count) > 0 AND safe_count > 0 THEN 1
+          ELSE 0
+        END,
+        first_seen = CASE
+          WHEN first_seen IS NULL OR excluded.first_seen < first_seen THEN excluded.first_seen
+          ELSE first_seen
+        END,
+        last_seen = CASE
+          WHEN last_seen IS NULL OR excluded.last_seen > last_seen THEN excluded.last_seen
+          ELSE last_seen
+        END,
+        updated_at = excluded.updated_at
+    `)
+      .bind(
+        entity.entityType,
+        entity.entityValue,
+        deltas.fraud,
+        deltas.spam,
+        deltas.telemarketing,
+        deltas.safe,
+        deltas.unknown,
+        deltas.positiveWeight,
+        deltas.negativeWeight,
+        seenAt,
+        updatedAt
+      )
+      .run()
+
+    return Number(result?.meta?.changes || 0) > 0
+  } catch (error) {
+    console.error("feedback_entity_aggregate_upsert_failed", error)
+    return false
+  }
+}
+
+async function persistFeedbackEntityAggregates(env, {
+  number = "",
+  message = "",
+  sourceUrl = "",
+  category = "unknown",
+  timestamp = Date.now(),
+} = {}) {
+  const entities = feedbackEntitiesFromInputs({ number, message, sourceUrl })
+  for (const entity of entities) {
+    await persistFeedbackEntityAggregate(env, entity, category, timestamp)
+  }
+}
+
+function feedbackCategoryFromNativeReport(body) {
+  const rawCategory = String(
+    body?.primary_category ||
+    body?.primaryCategory ||
+    body?.category ||
+    body?.report_category ||
+    body?.reportCategory ||
+    body?.type ||
+    ""
+  ).trim()
+
+  return rawCategory ? canonicalCategory(rawCategory) : "spam"
+}
+
 function feedbackEventPayloadFromUserFeedback(userFeedback) {
   switch (String(userFeedback || "").trim().toLowerCase()) {
     case "confirmed_scam":
@@ -2714,7 +2885,16 @@ async function persistFeedbackBatchEvent(env, event) {
       )
       .run()
 
-    return Number(result?.meta?.changes || 0) > 0
+    const inserted = Number(result?.meta?.changes || 0) > 0
+    if (inserted) {
+      await persistFeedbackEntityAggregates(env, {
+        number: event.number,
+        category: event.primaryCategory,
+        timestamp: event.createdAt,
+      })
+    }
+
+    return inserted
   } catch (error) {
     console.error("feedback_batch_insert_failed", error)
     return false
@@ -2856,6 +3036,13 @@ async function persistFeedbackEvent(env, {
       console.error("feedback_event_insert_failed_no_changes", result)
       return false
     }
+
+    await persistFeedbackEntityAggregates(env, {
+      number,
+      message,
+      category: payload.primaryCategory,
+      timestamp: createdAt,
+    })
 
     return true
   } catch (error) {
@@ -3864,6 +4051,14 @@ async function handleNativeReport(env, body, forcedChannel = null) {
     `)
       .bind(...bindValues)
       .run()
+
+    await persistFeedbackEntityAggregates(env, {
+      number,
+      message,
+      sourceUrl,
+      category: feedbackCategoryFromNativeReport(body),
+      timestamp: reportedAt,
+    })
 
     return jsonResponse({
       success: true,
