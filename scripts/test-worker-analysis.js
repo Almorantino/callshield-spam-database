@@ -482,6 +482,59 @@ test("OpenAI timeout budget defaults and clamps safely", () => {
   assert.equal(context.openAIFetchTimeoutMs({ OPENAI_FETCH_TIMEOUT_MS: "5000" }), 2500)
 })
 
+test("OpenAI request omits reasoning for non-reasoning models", async () => {
+  let requestBody = null
+  const openAIContext = loadWorker(async (_url, options) => {
+    requestBody = JSON.parse(options.body)
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: true,
+        score: 60,
+        category: "fraud",
+        reason_codes: ["ACCOUNT_THREAT"],
+        explanation: "menace compte",
+      }),
+    }), { status: 200 })
+  })
+
+  const result = await openAIContext.callOpenAI(
+    { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-4o-mini" },
+    "Suspension possible de votre compte.",
+    "",
+    { heuristic_score: 45, reason_codes: ["ACCOUNT_THREAT"] }
+  )
+
+  assert.ok(result)
+  assert.equal(requestBody.model, "gpt-4o-mini")
+  assert.equal(Object.hasOwn(requestBody, "reasoning"), false)
+})
+
+test("OpenAI request keeps minimal reasoning for GPT-5 models", async () => {
+  let requestBody = null
+  const openAIContext = loadWorker(async (_url, options) => {
+    requestBody = JSON.parse(options.body)
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: true,
+        score: 60,
+        category: "fraud",
+        reason_codes: ["ACCOUNT_THREAT"],
+        explanation: "menace compte",
+      }),
+    }), { status: 200 })
+  })
+
+  const result = await openAIContext.callOpenAI(
+    { OPENAI_API_KEY: "test-key", OPENAI_MODEL: "gpt-5-mini" },
+    "Suspension possible de votre compte.",
+    "",
+    { heuristic_score: 45, reason_codes: ["ACCOUNT_THREAT"] }
+  )
+
+  assert.ok(result)
+  assert.deepEqual(requestBody.reasoning, { effort: "minimal" })
+})
+
 test("carrier lookup disabled by default does not fetch", async () => {
   let fetchCalls = 0
   const carrierContext = loadWorker(async () => {

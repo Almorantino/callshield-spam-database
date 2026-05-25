@@ -1414,6 +1414,11 @@ function logOpenAIAnalysis({
   }))
 }
 
+function supportsOpenAIReasoning(model) {
+  const normalized = String(model || "").trim().toLowerCase()
+  return normalized.startsWith("gpt-5") || /^o\d/.test(normalized)
+}
+
 async function callOpenAI(env, message, number, analysisContext = null) {
   if (!env.OPENAI_API_KEY) return null
 
@@ -1431,7 +1436,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
       },
       body: JSON.stringify({
         model,
-        reasoning: { effort: "minimal" },
+        ...(supportsOpenAIReasoning(model) ? { reasoning: { effort: "minimal" } } : {}),
         input: [
           {
             role: "system",
