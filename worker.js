@@ -576,6 +576,44 @@ function rootDomainFromHost(domain) {
   return parts.slice(-2).join(".")
 }
 
+function normalizeBusinessNameValue(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+}
+
+function businessNameCandidatesFromMessage(text) {
+  const normalized = normalizeBusinessNameValue(text)
+  if (!normalized) return []
+
+  const words = normalized
+    .split(" ")
+    .filter((word) => word.length >= 2 && !/^\d+$/.test(word))
+    .slice(0, 60)
+  const candidates = new Set()
+
+  for (let start = 0; start < words.length; start += 1) {
+    for (let size = 1; size <= 4 && start + size <= words.length; size += 1) {
+      const phrase = words.slice(start, start + size).join(" ")
+      if (phrase.length >= 3) candidates.add(phrase)
+      const compact = phrase.replace(/\s+/g, "")
+      if (compact.length >= 4) candidates.add(compact)
+    }
+  }
+
+  return [...candidates].slice(0, 80)
+}
+
+function phoneNumberEvidenceCandidates(number) {
+  const normalized = normalizeNumber(number)
+  if (!normalized) return []
+  return [...new Set([normalized, `+${normalized}`])]
+}
+
 async function lookupTrustedDomains(env, domains = []) {
   const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))]
   if (normalizedDomains.length === 0) {
@@ -1169,6 +1207,109 @@ async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
       : { score: 0, reasons: [] }
   } catch (error) {
     console.error("external_url_evidence_lookup_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
+function hasBusinessReputationScenario(text) {
+  return /\b(assurance|mutuelle|sant[ée]|energie|énergie|electricit[ée]|gaz|prime|remboursement|aide|ch[èe]que|contrat|abonnement|mensualit[ée]|pr[ée]l[èe]vement|sepa|iban|rib|coordonn[ée]es bancaires|d[ée]marchage|conseiller|vente directe|rappel commercial)\b/i.test(
+    String(text || "")
+  )
+}
+
+async function analyzeBusinessReputationSignals(env, domains = [], number = "", message = "") {
+  if (!env?.DB || !hasBusinessReputationScenario(message)) {
+    return { score: 0, reasons: [] }
+  }
+
+  const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))].slice(0, 10)
+  const roots = [...new Set(normalizedDomains.map(rootDomainFromHost).filter(Boolean))].slice(0, 10)
+  const phoneNumbers = phoneNumberEvidenceCandidates(number).slice(0, 4)
+  const companyNameCandidates = businessNameCandidatesFromMessage(message)
+
+  if (
+    normalizedDomains.length === 0 &&
+    roots.length === 0 &&
+    phoneNumbers.length === 0 &&
+    companyNameCandidates.length === 0
+  ) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const whereParts = []
+    const bindValues = []
+
+    if (normalizedDomains.length > 0) {
+      whereParts.push(`(entity_type = 'domain' AND entity_value IN (${normalizedDomains.map(() => "?").join(",")}))`)
+      bindValues.push(...normalizedDomains)
+    }
+
+    if (roots.length > 0) {
+      whereParts.push(`(entity_type = 'root_domain' AND entity_value IN (${roots.map(() => "?").join(",")}))`)
+      bindValues.push(...roots)
+    }
+
+    if (phoneNumbers.length > 0) {
+      whereParts.push(`(entity_type = 'phone_number' AND entity_value IN (${phoneNumbers.map(() => "?").join(",")}))`)
+      bindValues.push(...phoneNumbers)
+    }
+
+    if (companyNameCandidates.length > 0) {
+      whereParts.push(`(entity_type = 'company_name' AND entity_value IN (${companyNameCandidates.map(() => "?").join(",")}))`)
+      bindValues.push(...companyNameCandidates)
+    }
+
+    if (whereParts.length === 0) return { score: 0, reasons: [] }
+
+    const rows = await env.DB.prepare(`
+      SELECT
+        entity_type,
+        status,
+        consumer_evidence_count,
+        contested_evidence_count,
+        max_confidence
+      FROM business_reputation_evidence_aggregates
+      WHERE ${whereParts.join(" OR ")}
+    `)
+      .bind(...bindValues)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let score = 0
+
+    for (const row of results) {
+      const status = String(row?.status || "").toLowerCase()
+      if (status !== "evidence_confirmed") continue
+
+      const entityType = String(row?.entity_type || "")
+      const consumerEvidenceCount = Number(row?.consumer_evidence_count || 0)
+      const contestedEvidenceCount = Number(row?.contested_evidence_count || 0)
+      const maxConfidence = Number(row?.max_confidence || 0)
+      if (consumerEvidenceCount <= 0 || maxConfidence < 0.6) continue
+
+      let rowScore = 0
+      if (entityType === "phone_number" && consumerEvidenceCount >= 1) {
+        rowScore = 15
+      } else if (
+        ["domain", "root_domain", "company", "company_name"].includes(entityType) &&
+        consumerEvidenceCount >= 2
+      ) {
+        rowScore = 20
+      }
+
+      if (contestedEvidenceCount >= consumerEvidenceCount) {
+        rowScore = Math.min(rowScore, 10)
+      }
+
+      score = Math.max(score, rowScore)
+    }
+
+    return score > 0
+      ? { score: Math.min(score, 20), reasons: ["KNOWN_BAD_ACTOR"] }
+      : { score: 0, reasons: [] }
+  } catch (error) {
+    console.error("business_reputation_lookup_failed", error)
     return { score: 0, reasons: [] }
   }
 }
@@ -2328,6 +2469,7 @@ async function buildFinalAnalysis(env, {
     "DELIVERY_SCAM",
     "JOB_SCAM",
     "BAD_REPUTATION",
+    "KNOWN_BAD_ACTOR",
   ].includes(code)) || hasAccountThreat(originalText)
   const aiUnavailableOrLowSafe =
     aiScore === null ||
@@ -3904,9 +4046,20 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseDomains.length > 0 &&
     !baseDomainsTrusted &&
     !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
+  const shouldLookupBusinessReputation =
+    useLocalEnrichment &&
+    hasBusinessReputationScenario(message) &&
+    !baseDomainsTrusted &&
+    !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN") &&
+    (
+      baseDomains.length > 0 ||
+      Boolean(number) ||
+      businessNameCandidatesFromMessage(message).length > 0
+    )
   const feedbackEntityReadsEstimate = shouldLookupFeedbackEntityAggregates ? 1 : 0
   const externalUrlEvidenceReadsEstimate = shouldLookupExternalUrlEvidence ? 1 : 0
-  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate + feedbackEntityReadsEstimate + externalUrlEvidenceReadsEstimate
+  const businessReputationReadsEstimate = shouldLookupBusinessReputation ? 1 : 0
+  d1ReadsEstimate += clusterReadsEstimate + localGraphReadsEstimate + feedbackEntityReadsEstimate + externalUrlEvidenceReadsEstimate + businessReputationReadsEstimate
 
   const [
     domainRisk,
@@ -3918,6 +4071,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     localGraph,
     rawFeedbackEntity,
     externalUrlEvidence,
+    businessReputation,
   ] = await Promise.all([
     usedDomainAge ? checkDomainAgeRisk(env, message).catch(() => ({ score: 0, reasons: [] })) : Promise.resolve({ score: 0, reasons: [] }),
     useLocalEnrichment ? analyzeNumberCluster(env, number) : Promise.resolve({ score: 0, reasons: [] }),
@@ -3932,6 +4086,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       : Promise.resolve({ score: 0, reasons: [] }),
     shouldLookupFeedbackEntityAggregates ? analyzeFeedbackEntitySignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
     shouldLookupExternalUrlEvidence ? analyzeExternalUrlEvidenceSignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
+    shouldLookupBusinessReputation ? analyzeBusinessReputationSignals(env, baseDomains, number, message) : Promise.resolve({ score: 0, reasons: [] }),
   ])
 
   const correlation = correlateSignals({
@@ -3953,6 +4108,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     ...globalGraph.reasons,
     ...localGraph.reasons,
     ...externalUrlEvidence.reasons,
+    ...businessReputation.reasons,
     ...correlation.reasons,
   ]
   const feedbackEntity = suppressSafeFeedbackEntityForCriticalReasons(rawFeedbackEntity, preFeedbackEntityReasons)
@@ -3968,6 +4124,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     globalGraph.score +
     localGraph.score +
     externalUrlEvidence.score +
+    businessReputation.score +
     correlation.score +
     feedbackEntity.score
   )

@@ -5,6 +5,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
 
@@ -74,6 +75,25 @@ def as_clean_list(value: object) -> List[str]:
   return results
 
 
+def normalize_business_name(value: object) -> str:
+  text = unicodedata.normalize("NFD", str(value or ""))
+  text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+  text = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
+  return " ".join(text.split())
+
+
+def company_name_values(value: object) -> List[str]:
+  normalized = normalize_business_name(value)
+  if not normalized:
+    return []
+
+  results = [normalized]
+  compact = normalized.replace(" ", "")
+  if compact and compact != normalized:
+    results.append(compact)
+  return list(dict.fromkeys(results))
+
+
 def normalize_status(value: object, has_consumer_evidence: bool = False) -> str:
   status = str(value or "").strip().lower()
   if has_consumer_evidence or status == "evidence_confirmed":
@@ -139,6 +159,16 @@ def add_company_candidate(aggregates: Dict[tuple, dict], company: dict, generate
   row["status"] = normalize_status(company.get("status"), row["consumer_evidence_count"] > 0)
   add_seen(row, generated_at)
 
+  for name_value in company_name_values(company.get("company_name")):
+    name_key = ("company_name", name_value)
+    name_row = aggregates.setdefault(name_key, empty_aggregate(*name_key))
+    add_company_context(name_row, company)
+    if source:
+      name_row["sources"].add(source)
+    name_row["corporate_source_count"] += 1
+    name_row["status"] = normalize_status(company.get("status"), name_row["consumer_evidence_count"] > 0)
+    add_seen(name_row, generated_at)
+
 
 def add_consumer_evidence(
   aggregates: Dict[tuple, dict],
@@ -200,6 +230,9 @@ def load_aggregates() -> Dict[tuple, dict]:
     company_key = str(evidence.get("company_key") or "").strip()
     if company_key:
       add_consumer_evidence(aggregates, "company", company_key, evidence, company, generated_at)
+    if company:
+      for name_value in company_name_values(company.get("company_name")):
+        add_consumer_evidence(aggregates, "company_name", name_value, evidence, company, generated_at)
     for domain in as_clean_list(evidence.get("domains")):
       add_consumer_evidence(aggregates, "domain", domain, evidence, company, generated_at)
     for root_domain in as_clean_list(evidence.get("root_domains")):
@@ -294,6 +327,7 @@ def summarize(rows: List[dict]) -> dict:
   return {
     "rows": len(rows),
     "company_rows": sum(1 for row in rows if row["entity_type"] == "company"),
+    "company_name_rows": sum(1 for row in rows if row["entity_type"] == "company_name"),
     "domain_rows": sum(1 for row in rows if row["entity_type"] == "domain"),
     "root_domain_rows": sum(1 for row in rows if row["entity_type"] == "root_domain"),
     "phone_number_rows": sum(1 for row in rows if row["entity_type"] == "phone_number"),

@@ -88,6 +88,9 @@ class MockD1Statement {
     if (this.db.options.feedbackSourceAggregateThrows && normalized.includes("feedback_source_aggregates")) {
       throw new Error("feedback source aggregate unavailable")
     }
+    if (this.db.options.businessReputationThrows && normalized.includes("business_reputation_evidence_aggregates")) {
+      throw new Error("business reputation aggregate unavailable")
+    }
     return { meta: { changes: 1 } }
   }
 }
@@ -136,6 +139,13 @@ class MockD1 {
         throw new Error("external URL evidence unavailable")
       }
       return { results: this.options.externalUrlEvidenceRows || [] }
+    }
+
+    if (normalized.includes("FROM business_reputation_evidence_aggregates")) {
+      if (this.options.businessReputationThrows) {
+        throw new Error("business reputation aggregate unavailable")
+      }
+      return { results: this.options.businessReputationRows || [] }
     }
 
     return { results: [] }
@@ -297,6 +307,17 @@ function externalUrlEvidenceRow(entityType, entityValue, overrides = {}) {
     source_count: overrides.source_count ?? 1,
     evidence_count: overrides.evidence_count ?? 1,
     max_confidence: overrides.max_confidence ?? 0.6,
+  }
+}
+
+function businessReputationRow(entityType, entityValue, overrides = {}) {
+  return {
+    entity_type: entityType,
+    entity_value: entityValue,
+    status: overrides.status || "evidence_confirmed",
+    consumer_evidence_count: overrides.consumer_evidence_count ?? 3,
+    contested_evidence_count: overrides.contested_evidence_count ?? 1,
+    max_confidence: overrides.max_confidence ?? 0.7,
   }
 }
 
@@ -1069,6 +1090,126 @@ test("external URL evidence D1 errors are neutral", async () => {
 
   assert.equal(result.score, 0)
   assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("business reputation domain adds limited bad actor signal", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("domain", "assistelec.fr"),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    ["assistelec.fr"],
+    "",
+    "Votre prime energie de 200 euros est disponible chez Assistelec."
+  )
+
+  assert.equal(result.score, 20)
+  assert.deepEqual(Array.from(result.reasons), ["KNOWN_BAD_ACTOR"])
+})
+
+test("business reputation requires matching consumer scenario", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("domain", "assistelec.fr"),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    ["assistelec.fr"],
+    "",
+    "Bonjour, votre rendez-vous est confirme demain."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM business_reputation_evidence_aggregates")))
+})
+
+test("business reputation company name alias is matched without domain", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "assistelec"),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    [],
+    "",
+    "Assistelec vous contacte pour votre prime energie."
+  )
+
+  assert.equal(result.score, 20)
+  assert.deepEqual(Array.from(result.reasons), ["KNOWN_BAD_ACTOR"])
+})
+
+test("business reputation candidate rows are neutral", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "fuzion", {
+        status: "candidate",
+        consumer_evidence_count: 0,
+        max_confidence: 0,
+      }),
+    ],
+  })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    [],
+    "",
+    "Fuzion vous contacte pour une assurance."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("business reputation D1 errors are neutral", async () => {
+  const env = makeEnv({ businessReputationThrows: true })
+  const result = await context.analyzeBusinessReputationSignals(
+    env,
+    ["assistelec.fr"],
+    "",
+    "Votre prime energie de 200 euros est disponible chez Assistelec."
+  )
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("business reputation endpoint produces warn but not block", async () => {
+  let fetchCalls = 0
+  const aiContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 0,
+        category: "safe",
+        reason_codes: [],
+        explanation: "safe",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({
+    openAIKey: "test-key",
+    businessReputationRows: [
+      businessReputationRow("domain", "assistelec.fr"),
+      businessReputationRow("root_domain", "assistelec.fr"),
+      businessReputationRow("company_name", "assistelec"),
+    ],
+  })
+  const result = await postJson(aiContext, env, "/ai/sms/analyze", {
+    message: "Assistelec: votre prime energie est disponible sur https://assistelec.fr",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(fetchCalls <= 1)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_BAD_ACTOR"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM business_reputation_evidence_aggregates")))
 })
 
 test("frequency counters preserve derived campaign and local graph scoring", async () => {
