@@ -52,8 +52,13 @@ def main():
     for feed in feeds:
         name = str(feed.get("name", "")).strip()
         url = str(feed.get("url", "")).strip()
+        enabled = bool(feed.get("enabled", True))
 
         if not name or not url:
+            continue
+
+        if not enabled:
+            print(f"Skipped {name}: disabled")
             continue
 
         try:
