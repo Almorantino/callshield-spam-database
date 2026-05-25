@@ -85,6 +85,9 @@ class MockD1Statement {
     if (this.db.options.feedbackEntityAggregateThrows && normalized.includes("feedback_entity_aggregates")) {
       throw new Error("feedback entity aggregate unavailable")
     }
+    if (this.db.options.feedbackSourceAggregateThrows && normalized.includes("feedback_source_aggregates")) {
+      throw new Error("feedback source aggregate unavailable")
+    }
     return { meta: { changes: 1 } }
   }
 }
@@ -294,6 +297,10 @@ function feedbackEntityAggregateRuns(env) {
 
 function feedbackEntityAggregateEventRuns(env) {
   return env.__db.runs.filter((run) => run.sql.includes("feedback_entity_aggregate_events"))
+}
+
+function feedbackSourceAggregateRuns(env) {
+  return env.__db.runs.filter((run) => run.sql.includes("feedback_source_aggregates"))
 }
 
 function aggregateEntityKeys(env) {
@@ -1080,6 +1087,7 @@ test("SMS report with domain writes feedback entity aggregates", async () => {
 
   const keys = aggregateEntityKeys(env)
   const aggregateRuns = feedbackEntityAggregateRuns(env)
+  const sourceRuns = feedbackSourceAggregateRuns(env)
 
   assert.equal(result.status, 200)
   assert.equal(result.payload.success, true)
@@ -1089,6 +1097,11 @@ test("SMS report with domain writes feedback entity aggregates", async () => {
   assert.ok(keys.includes("root_domain:secure-login-verif.xyz"))
   assert.equal(aggregateRuns.length, 3)
   assert.ok(aggregateRuns.every((run) => run.args[3] === 1))
+  assert.equal(sourceRuns.length, 1)
+  assert.equal(sourceRuns[0].args[0], "ios_reporting_extension|apple_reporting_extension|ios|apple_reporting_extension|sms")
+  assert.equal(sourceRuns[0].args[6], 1)
+  assert.equal(sourceRuns[0].args[9], 1)
+  assert.equal(sourceRuns[0].args[15], 0)
 })
 
 test("test SMS report source does not feed feedback entity aggregates", async () => {
@@ -1107,6 +1120,8 @@ test("test SMS report source does not feed feedback entity aggregates", async ()
   assert.equal(result.payload.domains_count, 1)
   assert.equal(feedbackEntityAggregateEventRuns(env).length, 0)
   assert.equal(feedbackEntityAggregateRuns(env).length, 0)
+  assert.equal(feedbackSourceAggregateRuns(env).length, 1)
+  assert.equal(feedbackSourceAggregateRuns(env)[0].args[15], 1)
 })
 
 test("duplicate SMS report does not increment feedback entity aggregates twice", async () => {
@@ -1148,6 +1163,25 @@ test("SMS report without URL only aggregates the number entity", async () => {
   assert.deepEqual(keys, ["number:33611223344"])
 })
 
+test("call report writes source aggregate without entity aggregate", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/call/report", {
+    number: "+33 6 11 22 33 44",
+    reported_at: 1774000000000,
+    category: "spam",
+  })
+
+  const sourceRuns = feedbackSourceAggregateRuns(env)
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.channel, "call")
+  assert.equal(feedbackEntityAggregateRuns(env).length, 0)
+  assert.equal(sourceRuns.length, 1)
+  assert.equal(sourceRuns[0].args[5], "call")
+  assert.equal(sourceRuns[0].args[9], 1)
+})
+
 test("legacy SMS feedback with URL aggregates number and domains", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/ai/sms/feedback", {
@@ -1158,6 +1192,7 @@ test("legacy SMS feedback with URL aggregates number and domains", async () => {
 
   const keys = aggregateEntityKeys(env)
   const aggregateRuns = feedbackEntityAggregateRuns(env)
+  const sourceRuns = feedbackSourceAggregateRuns(env)
 
   assert.equal(result.status, 200)
   assert.deepEqual(result.payload, { success: true })
@@ -1166,6 +1201,10 @@ test("legacy SMS feedback with URL aggregates number and domains", async () => {
   assert.ok(keys.includes("root_domain:secure-login-verif.xyz"))
   assert.equal(aggregateRuns.length, 3)
   assert.ok(aggregateRuns.every((run) => run.args[2] === 1))
+  assert.equal(sourceRuns.length, 1)
+  assert.equal(sourceRuns[0].args[1], "worker_feedback")
+  assert.equal(sourceRuns[0].args[2], "worker_feedback_single")
+  assert.equal(sourceRuns[0].args[8], 1)
 })
 
 test("duplicate legacy SMS feedback does not increment feedback entity aggregates twice", async () => {
@@ -1200,6 +1239,7 @@ test("iOS feedback batch without message aggregates only the number", async () =
   })
 
   const aggregateRuns = feedbackEntityAggregateRuns(env)
+  const sourceRuns = feedbackSourceAggregateRuns(env)
 
   assert.equal(result.status, 200)
   assert.equal(result.payload.status, "ok")
@@ -1207,6 +1247,10 @@ test("iOS feedback batch without message aggregates only the number", async () =
   assert.equal(result.payload.inserted, 1)
   assert.deepEqual(aggregateEntityKeys(env), ["number:33162304180"])
   assert.equal(aggregateRuns[0].args[3], 1)
+  assert.equal(sourceRuns.length, 1)
+  assert.equal(sourceRuns[0].args[1], "ios")
+  assert.equal(sourceRuns[0].args[2], "ios_feedback_batch")
+  assert.equal(sourceRuns[0].args[9], 1)
 })
 
 test("test feedback batch source stores event but skips aggregate", async () => {
@@ -1233,6 +1277,8 @@ test("test feedback batch source stores event but skips aggregate", async () => 
   assert.equal(feedbackEventInserts.length, 1)
   assert.equal(feedbackEntityAggregateEventRuns(env).length, 0)
   assert.equal(feedbackEntityAggregateRuns(env).length, 0)
+  assert.equal(feedbackSourceAggregateRuns(env).length, 1)
+  assert.equal(feedbackSourceAggregateRuns(env)[0].args[15], 1)
 })
 
 test("duplicate iOS feedback batch event does not increment aggregate twice", async () => {
@@ -1272,6 +1318,21 @@ test("feedback entity aggregate D1 errors do not break SMS report JSON", async (
   assert.equal(result.status, 200)
   assert.equal(result.payload.success, true)
   assert.equal(result.payload.domains_count, 1)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 3)
+})
+
+test("feedback source aggregate D1 errors do not break SMS report JSON", async () => {
+  const env = makeEnv({ feedbackSourceAggregateThrows: true })
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://secure-login-verif.xyz",
+    reported_at: 1774000000000,
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.domains_count, 1)
+  assert.equal(feedbackSourceAggregateRuns(env).length, 1)
   assert.equal(feedbackEntityAggregateRuns(env).length, 3)
 })
 

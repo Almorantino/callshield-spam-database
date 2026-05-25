@@ -2658,6 +2658,139 @@ function isFeedbackAggregateSourceAllowed({ source = "", sourceContext = "", rep
   return !/(^|[_:\-\s])(test|debug|fixture|mock|validation|stress)([_:\-\s]|$)/.test(parts.join(" "))
 }
 
+function normalizeFeedbackSourceDimension(value, fallback = "") {
+  const normalized = String(value || fallback || "").trim().toLowerCase()
+  return normalized.slice(0, 128)
+}
+
+function feedbackSourceAggregateKey({ source = "", sourceContext = "", platform = "", reportSurface = "", channel = "" } = {}) {
+  const normalizedSource = normalizeFeedbackSourceDimension(source, "unknown")
+  const normalizedSourceContext = normalizeFeedbackSourceDimension(sourceContext)
+  const normalizedPlatform = normalizeFeedbackSourceDimension(platform)
+  const normalizedReportSurface = normalizeFeedbackSourceDimension(reportSurface)
+  const normalizedChannel = normalizeFeedbackSourceDimension(channel)
+  return [
+    normalizedSource || "unknown",
+    normalizedSourceContext,
+    normalizedPlatform,
+    normalizedReportSurface,
+    normalizedChannel,
+  ].join("|")
+}
+
+async function persistFeedbackSourceAggregate(env, {
+  source = "",
+  sourceContext = "",
+  platform = "",
+  reportSurface = "",
+  channel = "",
+  category = "unknown",
+  timestamp = Date.now(),
+  validationStatus = "accepted",
+} = {}) {
+  if (!env?.DB) return false
+
+  const normalizedSource = normalizeFeedbackSourceDimension(source, "unknown") || "unknown"
+  const normalizedSourceContext = normalizeFeedbackSourceDimension(sourceContext)
+  const normalizedPlatform = normalizeFeedbackSourceDimension(platform)
+  const normalizedReportSurface = normalizeFeedbackSourceDimension(reportSurface)
+  const normalizedChannel = normalizeFeedbackSourceDimension(channel)
+  const sourceKey = feedbackSourceAggregateKey({
+    source: normalizedSource,
+    sourceContext: normalizedSourceContext,
+    platform: normalizedPlatform,
+    reportSurface: normalizedReportSurface,
+    channel: normalizedChannel,
+  })
+  const deltas = feedbackAggregateDeltas(category)
+  const seenAt = aggregateTimestampSeconds(timestamp)
+  const updatedAt = Math.floor(Date.now() / 1000)
+  const status = String(validationStatus || "").trim().toLowerCase()
+  const acceptedCount = status === "accepted" ? 1 : 0
+  const rejectedCount = status && status !== "accepted" ? 1 : 0
+  const testEventCount = isFeedbackAggregateSourceAllowed({
+    source: normalizedSource,
+    sourceContext: normalizedSourceContext,
+    reportSurface: normalizedReportSurface,
+  }) ? 0 : 1
+
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO feedback_source_aggregates (
+        source_key,
+        source,
+        source_context,
+        platform,
+        report_surface,
+        channel,
+        event_count,
+        accepted_count,
+        rejected_count,
+        fraud_count,
+        spam_count,
+        telemarketing_count,
+        safe_count,
+        unknown_count,
+        positive_weight,
+        negative_weight,
+        test_event_count,
+        first_seen,
+        last_seen,
+        updated_at
+      ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17, ?18
+      )
+      ON CONFLICT(source_key) DO UPDATE SET
+        event_count = event_count + excluded.event_count,
+        accepted_count = accepted_count + excluded.accepted_count,
+        rejected_count = rejected_count + excluded.rejected_count,
+        fraud_count = fraud_count + excluded.fraud_count,
+        spam_count = spam_count + excluded.spam_count,
+        telemarketing_count = telemarketing_count + excluded.telemarketing_count,
+        safe_count = safe_count + excluded.safe_count,
+        unknown_count = unknown_count + excluded.unknown_count,
+        positive_weight = positive_weight + excluded.positive_weight,
+        negative_weight = negative_weight + excluded.negative_weight,
+        test_event_count = test_event_count + excluded.test_event_count,
+        first_seen = CASE
+          WHEN first_seen IS NULL OR excluded.first_seen < first_seen THEN excluded.first_seen
+          ELSE first_seen
+        END,
+        last_seen = CASE
+          WHEN last_seen IS NULL OR excluded.last_seen > last_seen THEN excluded.last_seen
+          ELSE last_seen
+        END,
+        updated_at = excluded.updated_at
+    `)
+      .bind(
+        sourceKey,
+        normalizedSource,
+        normalizedSourceContext,
+        normalizedPlatform,
+        normalizedReportSurface,
+        normalizedChannel,
+        acceptedCount,
+        rejectedCount,
+        deltas.fraud,
+        deltas.spam,
+        deltas.telemarketing,
+        deltas.safe,
+        deltas.unknown,
+        deltas.positiveWeight,
+        deltas.negativeWeight,
+        testEventCount,
+        seenAt,
+        updatedAt
+      )
+      .run()
+
+    return Number(result?.meta?.changes || 0) > 0
+  } catch (error) {
+    console.error("feedback_source_aggregate_upsert_failed", error)
+    return false
+  }
+}
+
 function feedbackEntitiesFromInputs({ number = "", message = "", sourceUrl = "" } = {}) {
   const entities = []
   const seen = new Set()
@@ -3026,6 +3159,15 @@ async function persistFeedbackBatchEvent(env, event) {
 
     const inserted = Number(result?.meta?.changes || 0) > 0
     if (inserted) {
+      await persistFeedbackSourceAggregate(env, {
+        source: event.source,
+        sourceContext: event.sourceContext,
+        platform: event.platform,
+        category: event.primaryCategory,
+        timestamp: event.createdAt,
+        validationStatus: "accepted",
+      })
+
       await persistFeedbackEntityAggregates(env, {
         number: event.number,
         category: event.primaryCategory,
@@ -3178,6 +3320,15 @@ async function persistFeedbackEvent(env, {
       console.error("feedback_event_insert_failed_no_changes", result)
       return false
     }
+
+    await persistFeedbackSourceAggregate(env, {
+      source: "worker_feedback",
+      sourceContext,
+      platform: "worker",
+      category: payload.primaryCategory,
+      timestamp: createdAt,
+      validationStatus: "accepted",
+    })
 
     await persistFeedbackEntityAggregates(env, {
       number,
@@ -4214,6 +4365,17 @@ async function handleNativeReport(env, body, forcedChannel = null) {
 
     const feedbackCategory = feedbackCategoryFromNativeReport(body)
 
+    await persistFeedbackSourceAggregate(env, {
+      source,
+      sourceContext: reportSurface,
+      platform: "ios",
+      reportSurface,
+      channel,
+      category: feedbackCategory,
+      timestamp: reportedAt,
+      validationStatus: "accepted",
+    })
+
     await persistFeedbackEntityAggregates(env, {
       number,
       message,
@@ -4248,6 +4410,18 @@ async function handleNativeReport(env, body, forcedChannel = null) {
     `)
       .bind(number, source, channel, reportSurface, reportedAt)
       .run()
+
+    const feedbackCategory = feedbackCategoryFromNativeReport(body)
+    await persistFeedbackSourceAggregate(env, {
+      source,
+      sourceContext: reportSurface,
+      platform: "ios",
+      reportSurface,
+      channel,
+      category: feedbackCategory,
+      timestamp: reportedAt,
+      validationStatus: "accepted",
+    })
 
     return jsonResponse({
       success: true,
