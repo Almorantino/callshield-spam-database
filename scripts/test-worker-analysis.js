@@ -566,7 +566,7 @@ test("safe AI cannot clear fake authority warning", async () => {
   assert.equal(decisionOf(result).action, "warn")
 })
 
-test("ambiguous AI window without number avoids redundant D1 reads", async () => {
+test("low-risk payment pressure without number skips AI and avoids redundant D1 reads", async () => {
   let fetchCalls = 0
   const aiContext = loadWorker(async () => {
     fetchCalls += 1
@@ -586,15 +586,41 @@ test("ambiguous AI window without number avoids redundant D1 reads", async () =>
   })
 
   assert.equal(result.status, 200)
-  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
+  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
   assert.equal(decisionOf(result.payload).action, "warn")
   assert.ok(scoreOf(result.payload) >= 35)
-  assert.equal(fetchCalls, 1)
+  assert.equal(fetchCalls, 0)
   assert.ok(env.__db.statements.length <= 4, `expected <= 4 D1 statements, got ${env.__db.statements.length}`)
   assert.equal(
     env.__db.statements.filter((sql) => sql.includes("WHERE number_e164 = ?1")).length,
     0
   )
+})
+
+test("account threat still reaches AI window", async () => {
+  let fetchCalls = 0
+  const aiContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: true,
+        score: 60,
+        category: "fraud",
+        reason_codes: ["ACCOUNT_THREAT"],
+        explanation: "menace compte",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({ openAIKey: "test-key" })
+  const result = await postJson(aiContext, env, "/ai/sms/analyze", {
+    message: "Suspension possible de votre compte.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 1)
+  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
+  assert.equal(decisionOf(result.payload).category, "fraud")
+  assert.equal(decisionOf(result.payload).action, "warn")
 })
 
 test("frequency counters preserve derived campaign and local graph scoring", async () => {

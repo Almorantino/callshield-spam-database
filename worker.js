@@ -3092,7 +3092,6 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const canUseSensitiveLowRiskFastWarn =
     enrichedHeuristicScore <= 35 &&
     lowScoreNeedsAIReview &&
-    Boolean(number) &&
     !appleFastBudget &&
     !baseHasUrl &&
     !baseHasUrgency &&
