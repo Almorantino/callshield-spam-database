@@ -500,6 +500,46 @@ test("worker validation analysis skips learning persistence", async () => {
   assert.equal(env.__db.runs.length, 0)
 })
 
+test("worker validation analysis skips OpenAI in ambiguous URL window", async () => {
+  let fetchCalls = 0
+  const logs = []
+  const validationContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 40,
+        category: "unknown",
+        reason_codes: ["URL"],
+        explanation: "lien ambigu",
+      }),
+    }), { status: 200 })
+  }, {
+    logSink(args) {
+      logs.push(args)
+    },
+  })
+  const env = makeEnv({ openAIKey: "test-key" })
+  const scheduled = []
+  const result = await postJson(validationContext, env, "/ai/sms/analyze", {
+    source: "worker_validation",
+    message: "Consultez votre dossier sur https://example.com",
+  }, {
+    waitUntil(promise) {
+      scheduled.push(Promise.resolve(promise))
+    },
+  })
+  const entry = logs.find((args) => args[0] === "sms_analyze_path")
+  const payload = JSON.parse(entry[1])
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 0)
+  assert.equal(scheduled.length, 0)
+  assert.equal(payload.path, "worker_validation_fast_budget")
+  assert.equal(payload.used_ai, false)
+  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
+})
+
 test("OTP-only SMS stays safe/allow", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/ai/sms/analyze", {

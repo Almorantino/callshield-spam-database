@@ -3667,7 +3667,8 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const message = smsAnalyzeMessageFromBody(body)
   const number = smsAnalyzeNumberFromBody(body)
   const appleFastBudget = isAppleMessageFilterAnalyzeBody(body)
-  const persistAnalysis = !isSMSAnalyzeValidationOnly(body)
+  const validationOnly = isSMSAnalyzeValidationOnly(body)
+  const persistAnalysis = !validationOnly
 
   if (!message) {
     return jsonResponse({ error: "missing message" }, 400)
@@ -4218,6 +4219,66 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     })
 
     monitorPath = "trusted_domain_fast_allow"
+    logSMSAnalyzePath({
+      path: monitorPath,
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
+
+    return jsonResponse(result)
+  }
+
+  if (validationOnly) {
+    const validationHeuristicScore = requiresAIReviewForLowScore(message, combinedReasons)
+      ? Math.max(enrichedHeuristicScore, 35)
+      : enrichedHeuristicScore
+    const rawResult = await buildFinalAnalysis(env, {
+      heuristicScore: validationHeuristicScore,
+      heuristicReasons: combinedReasons,
+      aiResult: null,
+      decisionSource: "heuristic_fallback_enriched",
+      explanation: "Décision heuristique enrichie avec budget validation Worker.",
+      sourceMessage: message,
+      precomputedDomains: baseDomains,
+      precomputedTrustContext: baseTrustContext,
+      precomputedBrandContext: brandRegistryContext,
+    })
+
+    const result = finalizeCanonicalAnalysisResult(rawResult, {
+      inputHash,
+      modelVersion: "validation_fast_v1",
+      processingTimeMs: Date.now() - startedAt,
+    })
+
+    const validationDecision = getAnalysisDecision(result)
+    const validationMeta = getAnalysisMeta(result)
+
+    await scheduleAnalyzePersistence({
+      input_hash: inputHash,
+      number_e164: number || null,
+      message,
+      normalized_message: normalizedMessage,
+      heuristic_score: validationHeuristicScore,
+      ai_score: null,
+      final_score: getAnalysisScore(result),
+      risk_level: validationDecision.risk_level,
+      action: validationDecision.action,
+      category: validationDecision.category,
+      decision_source: validationDecision.decision_source,
+      model: validationMeta.model,
+      model_version: validationMeta.model_version || "validation_fast_v1",
+      reason_codes_json: JSON.stringify(validationDecision.reason_codes || []),
+      explanation: validationDecision.explanation || "",
+      user_feedback: null,
+      reviewed_label: null,
+    })
+
+    monitorPath = "worker_validation_fast_budget"
     logSMSAnalyzePath({
       path: monitorPath,
       number,
