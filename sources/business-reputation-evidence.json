@@ -1,6 +1,6 @@
 {
   "schema_version": "business_reputation_evidence_v1",
-  "generated_at": "2026-05-25T19:58:28Z",
+  "generated_at": "2026-05-25T20:53:43Z",
   "policy": {
     "default_usage": "evidence_only",
     "direct_blocking_allowed": false,
@@ -12,7 +12,7 @@
   "stats": {
     "person_seeds": 4,
     "companies": 28,
-    "evidence_rows": 28,
+    "evidence_rows": 34,
     "fetch_enabled": false,
     "fetch_errors": 0
   },
@@ -90,7 +90,9 @@
       ],
       "candidate_reason": "Pappers lists distribution-to-consumer activity with protection juridique and insurance-related products.",
       "runtime_scoring_allowed": false,
-      "domains": [],
+      "domains": [
+        "bigyipsylon.fr"
+      ],
       "pappers_url": "https://www.pappers.fr/entreprise/by-big-yipsylon-894765288",
       "status": "evidence_confirmed",
       "source": "curated_registry_seed"
@@ -965,6 +967,50 @@
       "notes": "Consumer cancellation guide mapping CDA Developpement/IAG products and related entities. Below Worker scoring threshold alone."
     },
     {
+      "source_id": "resilier_planet_assurances_contract_context",
+      "source_name": "Resilier.fr",
+      "source_url": "https://www.resilier.fr/planet-assurances.php",
+      "evidence_type": "consumer_resiliation_guide",
+      "company_key": "siren:808394936",
+      "company_name": "PLANET ASSURANCES",
+      "siren": "808394936",
+      "domains": [],
+      "root_domains": [],
+      "phone_numbers": [],
+      "observed_patterns": [
+        "energy_contract_cross_sell",
+        "tacit_renewal_contract",
+        "insurance_finance",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.55,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer cancellation guide for Planet Assurances, mentioning energy-contract door-to-door context and KSM/Planet Assurances cancellation paths. Below Worker scoring threshold alone."
+    },
+    {
+      "source_id": "resilier_planet_assurances_contract_context",
+      "source_name": "Resilier.fr",
+      "source_url": "https://www.resilier.fr/planet-assurances.php",
+      "evidence_type": "consumer_resiliation_guide",
+      "company_key": "siren:752374223",
+      "company_name": "K S M",
+      "siren": "752374223",
+      "domains": [],
+      "root_domains": [],
+      "phone_numbers": [],
+      "observed_patterns": [
+        "energy_contract_cross_sell",
+        "tacit_renewal_contract",
+        "insurance_finance",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.55,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer cancellation guide for Planet Assurances, mentioning energy-contract door-to-door context and KSM/Planet Assurances cancellation paths. Below Worker scoring threshold alone."
+    },
+    {
       "source_id": "trustpilot_flandrin_assurances_reviews",
       "source_name": "Trustpilot",
       "source_url": "https://fr.trustpilot.com/review/flandrin-assurances.fr",
@@ -1157,6 +1203,58 @@
       "notes": "Investigation article mapping insurance-network allegations. Contested source; use only as low-weight corroborating evidence."
     },
     {
+      "source_id": "signal_arnaques_meteore_521671",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/521671",
+      "evidence_type": "consumer_report_thread",
+      "company_key": "siren:841519739",
+      "company_name": "METEORE",
+      "siren": "841519739",
+      "domains": [],
+      "root_domains": [],
+      "phone_numbers": [
+        "+33985402776"
+      ],
+      "observed_patterns": [
+        "energy_provider_impersonation",
+        "insurance_finance",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.68,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report thread describing a call presented as Enedis and a Météore insurance subscription context."
+    },
+    {
+      "source_id": "resilier_meteore_contract_context",
+      "source_name": "Resilier.fr",
+      "source_url": "https://www.resilier.fr/meteore.php",
+      "evidence_type": "consumer_resiliation_guide",
+      "company_key": "siren:841519739",
+      "company_name": "METEORE",
+      "siren": "841519739",
+      "domains": [
+        "meteore.fr",
+        "meteore.gerermesdomaines.com"
+      ],
+      "root_domains": [
+        "meteore.fr",
+        "gerermesdomaines.com"
+      ],
+      "phone_numbers": [],
+      "observed_patterns": [
+        "energy_contract_cross_sell",
+        "tacit_renewal_contract",
+        "insurance_finance",
+        "subscription_or_sepa_risk"
+      ],
+      "confidence_score": 0.55,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer cancellation guide for Météore, describing energy-contract context, monthly insurance products and tacit renewal. Below Worker scoring threshold alone."
+    },
+    {
       "source_id": "signal_arnaques_vee_740200",
       "source_name": "Signal-Arnaques",
       "source_url": "https://www.signal-arnaques.com/scam/view/740200",
@@ -1201,6 +1299,63 @@
       "notes": "Consumer association publication about SAS VEE. Use as weighted evidence only."
     },
     {
+      "source_id": "signal_arnaques_big_yipsylon_372254",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/372254",
+      "evidence_type": "consumer_report_thread",
+      "company_key": "siren:894765288",
+      "company_name": "B.Y BIG YIPSYLON",
+      "siren": "894765288",
+      "domains": [
+        "bigyipsylon.fr"
+      ],
+      "root_domains": [
+        "bigyipsylon.fr"
+      ],
+      "phone_numbers": [
+        "+33187040567",
+        "+33187640567"
+      ],
+      "observed_patterns": [
+        "energy_saving_device",
+        "energy_provider_impersonation",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.72,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report thread mentioning Big Yipsylon/RJTEL, an electricity-saving box, energy-bill reduction claims and recurring subscription concerns."
+    },
+    {
+      "source_id": "signal_arnaques_big_yipsylon_359988",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/359988",
+      "evidence_type": "consumer_report_thread",
+      "company_key": "siren:894765288",
+      "company_name": "B.Y BIG YIPSYLON",
+      "siren": "894765288",
+      "domains": [
+        "bigyipsylon.fr"
+      ],
+      "root_domains": [
+        "bigyipsylon.fr"
+      ],
+      "phone_numbers": [
+        "+33187640567"
+      ],
+      "observed_patterns": [
+        "energy_saving_device",
+        "energy_provider_impersonation",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.72,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report thread around Big Yipsylon phone contact, electricity-provider presentation and insurance/subscription concerns."
+    },
+    {
       "source_id": "adc_france_big_yipsylon_2022",
       "source_name": "ADC France",
       "source_url": "https://adcfrance.fr/wp-content/uploads/2022/08/Leconomiseur-delectricite-de-BIG-YIPSYLON.pdf",
@@ -1208,8 +1363,12 @@
       "company_key": "siren:894765288",
       "company_name": "B.Y BIG YIPSYLON",
       "siren": "894765288",
-      "domains": [],
-      "root_domains": [],
+      "domains": [
+        "bigyipsylon.fr"
+      ],
+      "root_domains": [
+        "bigyipsylon.fr"
+      ],
       "phone_numbers": [],
       "observed_patterns": [
         "energy_saving_device",

@@ -323,8 +323,17 @@ def write_sql_chunks(rows: List[dict]) -> List[Path]:
 
 def import_sql_files(paths: List[Path]) -> None:
   for index, path in enumerate(paths, start=1):
-    run(["wrangler", "d1", "execute", DB_NAME, "--remote", "--file", str(path), "--yes"])
-    print(f"imported {index}/{len(paths)} {path.name}")
+    try:
+      run(["wrangler", "d1", "execute", DB_NAME, "--remote", "--file", str(path), "--yes"])
+      print(f"imported {index}/{len(paths)} {path.name}")
+      continue
+    except RuntimeError:
+      print(f"file import failed for {path.name}; retrying with command fallback")
+
+    statements = [part.strip() for part in path.read_text(encoding="utf-8").split(";\n") if part.strip()]
+    for statement in statements:
+      run(["wrangler", "d1", "execute", DB_NAME, "--remote", "--command", f"{statement};"])
+    print(f"imported {index}/{len(paths)} {path.name} via command fallback")
 
 
 def summarize(rows: List[dict]) -> dict:

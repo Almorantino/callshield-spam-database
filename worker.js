@@ -1212,7 +1212,7 @@ async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
 }
 
 function hasBusinessReputationScenario(text) {
-  return /\b(assurance|mutuelle|sant[ée]|energie|énergie|electricit[ée]|gaz|prime|remboursement|aide|ch[èe]que|contrat|abonnement|mensualit[ée]|pr[ée]l[èe]vement|sepa|iban|rib|coordonn[ée]es bancaires|d[ée]marchage|conseiller|vente directe|rappel commercial)\b/i.test(
+  return /\b(assurance|mutuelle|sant[ée]|energie|énergie|electricit[ée]|gaz|prime|remboursement|aide|ch[èe]que|contrat|abonnement|mensualit[ée]|pr[ée]l[èe]vement|sepa|iban|rib|coordonn[ée]es bancaires|d[ée]marchage|conseiller|vente directe|rappel commercial|fournisseur|[ée]conomiseur|economiseur)\b/i.test(
     String(text || "")
   )
 }
@@ -1442,6 +1442,7 @@ function requiresAIReviewForLowScore(message, reasonCodes = []) {
       "PHISHING_INTENT",
       "FAKE_AUTHORITY",
       "JOB_SCAM",
+      "KNOWN_BAD_ACTOR",
     ].includes(code))
 }
 
@@ -3870,6 +3871,31 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const baseHasTelemarketing = hasTelemarketingContent(message)
   const baseHasSuspiciousPattern = containsSuspiciousPattern(message)
   const trustedTransactional = baseDomainsTrusted && isTransactionalLegitMessage(message) && !hasFraudCriticalReason(baseHeuristicWithReputation.reasonCodes)
+  const businessReputationScenario = hasBusinessReputationScenario(message)
+  const businessReputationCandidateNames = businessNameCandidatesFromMessage(message)
+  const shouldLookupBusinessReputationEarly =
+    businessReputationScenario &&
+    !trustedTransactional &&
+    !baseDomainsTrusted &&
+    !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN") &&
+    (
+      baseDomains.length > 0 ||
+      Boolean(number) ||
+      businessReputationCandidateNames.length > 0
+    )
+  if (shouldLookupBusinessReputationEarly) {
+    d1ReadsEstimate += 1
+  }
+  const earlyBusinessReputation = shouldLookupBusinessReputationEarly
+    ? await analyzeBusinessReputationSignals(env, baseDomains, number, message)
+    : { score: 0, reasons: [] }
+  const baseHeuristicWithBusinessReputation = {
+    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score),
+    reasonCodes: uniqueReasonCodes([
+      ...baseHeuristicWithReputation.reasonCodes,
+      ...earlyBusinessReputation.reasons,
+    ]),
+  }
 
   const clearTelemarketingFastPath =
     baseHasTelemarketing &&
@@ -3879,13 +3905,14 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     !baseHasIdentity &&
     !baseHasAccountThreat &&
     (baseDomainsTrusted || !baseSpoof) &&
-    baseHeuristicWithReputation.score <= 80
+    baseHeuristicWithBusinessReputation.score <= 80
 
   if (clearTelemarketingFastPath) {
-    const telemarketingHeuristicScore = 45
+    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score)
     const telemarketingReasons = uniqueReasonCodes([
       ...baseHeuristic.reasonCodes,
       ...baseDomainReputation.reasons,
+      ...earlyBusinessReputation.reasons,
       "TELEMARKETING_PATTERN",
     ])
 
@@ -3958,7 +3985,8 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     (!baseDomainsTrusted && baseSpoof) ||
     baseHasSuspiciousPattern ||
     baseHasIdentity ||
-    baseHasTelemarketing
+    baseHasTelemarketing ||
+    earlyBusinessReputation.score > 0
 
   const localFrequencyReadsEstimate = trustedTransactional || !suspiciousCore
     ? 0
@@ -3970,7 +3998,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     : await analyzeLocalFrequencySignals(env, number, normalizedMessage)
   const shouldCheckGlobalThreatGraph = Boolean(number || suspiciousCore)
 
-  const fastDecision = await fastHeuristicDecision(env, message, baseHeuristicWithReputation, baseDomains, baseTrustContext)
+  const fastDecision = await fastHeuristicDecision(env, message, baseHeuristicWithBusinessReputation, baseDomains, baseTrustContext)
 
   if (fastDecision.matched) {
     const rawResult = await buildFinalAnalysis(env, {
@@ -4047,14 +4075,15 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     !baseDomainsTrusted &&
     !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN")
   const shouldLookupBusinessReputation =
+    !shouldLookupBusinessReputationEarly &&
     useLocalEnrichment &&
-    hasBusinessReputationScenario(message) &&
+    businessReputationScenario &&
     !baseDomainsTrusted &&
     !baseDomainReputation.reasons.includes("KNOWN_MALICIOUS_DOMAIN") &&
     (
       baseDomains.length > 0 ||
       Boolean(number) ||
-      businessNameCandidatesFromMessage(message).length > 0
+      businessReputationCandidateNames.length > 0
     )
   const feedbackEntityReadsEstimate = shouldLookupFeedbackEntityAggregates ? 1 : 0
   const externalUrlEvidenceReadsEstimate = shouldLookupExternalUrlEvidence ? 1 : 0
@@ -4086,7 +4115,9 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       : Promise.resolve({ score: 0, reasons: [] }),
     shouldLookupFeedbackEntityAggregates ? analyzeFeedbackEntitySignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
     shouldLookupExternalUrlEvidence ? analyzeExternalUrlEvidenceSignals(env, baseDomains) : Promise.resolve({ score: 0, reasons: [] }),
-    shouldLookupBusinessReputation ? analyzeBusinessReputationSignals(env, baseDomains, number, message) : Promise.resolve({ score: 0, reasons: [] }),
+    shouldLookupBusinessReputationEarly
+      ? Promise.resolve({ score: 0, reasons: [] })
+      : shouldLookupBusinessReputation ? analyzeBusinessReputationSignals(env, baseDomains, number, message) : Promise.resolve({ score: 0, reasons: [] }),
   ])
 
   const correlation = correlateSignals({

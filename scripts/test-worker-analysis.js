@@ -1275,6 +1275,67 @@ test("business reputation endpoint produces warn but not block", async () => {
   assert.ok(env.__db.statements.some((sql) => sql.includes("FROM business_reputation_evidence_aggregates")))
 })
 
+test("business reputation company evidence prevents fast allow", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "big yipsylon", {
+        consumer_evidence_count: 3,
+        contested_evidence_count: 0,
+        max_confidence: 0.72,
+      }),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Big Yipsylon vous propose un economiseur electricite avec abonnement.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_BAD_ACTOR"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM business_reputation_evidence_aggregates")))
+})
+
+test("business reputation can enrich telemarketing fast path", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "meteore", {
+        consumer_evidence_count: 3,
+        contested_evidence_count: 1,
+        max_confidence: 0.68,
+      }),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Meteore vous contacte au nom de votre fournisseur energie pour une assurance facture.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_BAD_ACTOR"))
+  assert.ok(reasonsOf(result.payload).includes("TELEMARKETING_PATTERN"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+})
+
+test("business reputation low-confidence endpoint stays neutral", async () => {
+  const env = makeEnv({
+    businessReputationRows: [
+      businessReputationRow("company_name", "planet assurances", {
+        consumer_evidence_count: 3,
+        contested_evidence_count: 1,
+        max_confidence: 0.58,
+      }),
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Planet Assurances vous contacte pour votre contrat assurance.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!reasonsOf(result.payload).includes("KNOWN_BAD_ACTOR"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+})
+
 test("frequency counters preserve derived campaign and local graph scoring", async () => {
   const spread = context.campaignPatternFromDistinctNumbers(11)
   assert.equal(spread.score, 25)
