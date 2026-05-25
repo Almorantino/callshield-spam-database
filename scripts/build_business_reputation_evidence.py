@@ -162,6 +162,11 @@ def load_seed_companies(registry: dict) -> List[dict]:
                 "company_key": key,
                 "company_name": name,
                 "siren": siren,
+                "aliases": [
+                    normalize_text(value, 160)
+                    for value in row.get("aliases") or []
+                    if normalize_text(value, 160)
+                ],
                 "person_key": normalize_text(row.get("person_key"), 128),
                 "role": normalize_text(row.get("role"), 128),
                 "activity_hint": normalize_text(row.get("activity_hint"), 256),
@@ -214,6 +219,14 @@ def merge_companies(rows: Iterable[dict]) -> List[dict]:
                 seen_tags.add(tag)
                 risk_tags.append(tag)
         current["risk_tags"] = risk_tags
+
+        aliases = list(current.get("aliases") or [])
+        seen_aliases = set(aliases)
+        for alias in row.get("aliases") or []:
+            if alias not in seen_aliases:
+                seen_aliases.add(alias)
+                aliases.append(alias)
+        current["aliases"] = aliases
         current["runtime_scoring_allowed"] = False
 
         sources = set(str(current.get("source") or "").split(","))

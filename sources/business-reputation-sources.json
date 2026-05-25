@@ -93,6 +93,7 @@
       "candidate_reason": "Pappers lists distribution-to-consumer activity with protection juridique and insurance-related products.",
       "runtime_scoring_allowed": false,
       "pappers_url": "https://www.pappers.fr/entreprise/by-big-yipsylon-894765288",
+      "aliases": ["BIG YIPSYLON"],
       "domains": ["bigyipsylon.fr"],
       "status": "candidate"
     },

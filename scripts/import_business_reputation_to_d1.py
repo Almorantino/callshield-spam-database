@@ -94,6 +94,16 @@ def company_name_values(value: object) -> List[str]:
   return list(dict.fromkeys(results))
 
 
+def company_name_and_alias_values(company: dict) -> List[str]:
+  values: List[str] = []
+  for name_value in company_name_values(company.get("company_name")):
+    values.append(name_value)
+  for alias in as_clean_list(company.get("aliases")):
+    for name_value in company_name_values(alias):
+      values.append(name_value)
+  return list(dict.fromkeys(values))
+
+
 def normalize_status(value: object, has_consumer_evidence: bool = False) -> str:
   status = str(value or "").strip().lower()
   if has_consumer_evidence or status == "evidence_confirmed":
@@ -142,6 +152,8 @@ def add_company_context(row: dict, company: dict) -> None:
     value = str(company.get(field) or "").strip()
     if value:
       row[target].add(value)
+  for alias in as_clean_list(company.get("aliases")):
+    row["company_names"].add(alias)
   row["domains"].update(as_clean_list(company.get("domains")))
   row["risk_tags"].update(as_clean_list(company.get("risk_tags")))
 
@@ -160,7 +172,7 @@ def add_company_candidate(aggregates: Dict[tuple, dict], company: dict, generate
   row["status"] = normalize_status(company.get("status"), row["consumer_evidence_count"] > 0)
   add_seen(row, generated_at)
 
-  for name_value in company_name_values(company.get("company_name")):
+  for name_value in company_name_and_alias_values(company):
     name_key = ("company_name", name_value)
     name_row = aggregates.setdefault(name_key, empty_aggregate(*name_key))
     add_company_context(name_row, company)
@@ -235,7 +247,7 @@ def load_aggregates() -> Dict[tuple, dict]:
     if company_key:
       add_consumer_evidence(aggregates, "company", company_key, evidence, company, generated_at)
     if company:
-      for name_value in company_name_values(company.get("company_name")):
+      for name_value in company_name_and_alias_values(company):
         add_consumer_evidence(aggregates, "company_name", name_value, evidence, company, generated_at)
     for domain in as_clean_list(evidence.get("domains")):
       add_consumer_evidence(aggregates, "domain", domain, evidence, company, generated_at)
