@@ -3353,6 +3353,67 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     return jsonResponse(result)
   }
 
+  const trustedDomainFastAllow =
+    baseDomains.length > 0 &&
+    baseDomainsTrusted &&
+    !hasFraudCriticalReason(combinedReasons)
+
+  if (trustedDomainFastAllow) {
+    const rawResult = await buildFinalAnalysis(env, {
+      heuristicScore: enrichedHeuristicScore,
+      heuristicReasons: combinedReasons,
+      aiResult: null,
+      decisionSource: "heuristic_fallback_enriched",
+      explanation: "Décision heuristique rapide pour domaine trusted.",
+      sourceMessage: message,
+      precomputedDomains: baseDomains,
+      precomputedTrustContext: baseTrustContext,
+    })
+
+    const result = finalizeCanonicalAnalysisResult(rawResult, {
+      inputHash,
+      modelVersion: "fast_v2",
+      processingTimeMs: Date.now() - startedAt,
+    })
+
+    const trustedDecision = getAnalysisDecision(result)
+    const trustedMeta = getAnalysisMeta(result)
+
+    await scheduleSMSAnalysisPersistence(ctx, env, {
+      input_hash: inputHash,
+      number_e164: number || null,
+      message,
+      normalized_message: normalizedMessage,
+      heuristic_score: enrichedHeuristicScore,
+      ai_score: null,
+      final_score: getAnalysisScore(result),
+      risk_level: trustedDecision.risk_level,
+      action: trustedDecision.action,
+      category: trustedDecision.category,
+      decision_source: trustedDecision.decision_source,
+      model: trustedMeta.model,
+      model_version: trustedMeta.model_version || "fast_v2",
+      reason_codes_json: JSON.stringify(trustedDecision.reason_codes || []),
+      explanation: trustedDecision.explanation || "",
+      user_feedback: null,
+      reviewed_label: null,
+    })
+
+    monitorPath = "trusted_domain_fast_allow"
+    logSMSAnalyzePath({
+      path: monitorPath,
+      number,
+      result,
+      startedAt,
+      usedAI: false,
+      usedDomainAge,
+      appleFastBudget,
+      d1ReadsEstimate,
+    })
+
+    return jsonResponse(result)
+  }
+
   try {
     const aiAnalysisContext = {
       heuristic_score: enrichedHeuristicScore,

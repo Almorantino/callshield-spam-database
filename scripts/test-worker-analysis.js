@@ -431,6 +431,78 @@ test("trusted La Poste tracking link is allowed", async () => {
   assert.ok(reasonsOf(result.payload).includes("TRUSTED_DOMAIN"))
 })
 
+test("trusted La Poste tracking link skips OpenAI", async () => {
+  let fetchCalls = 0
+  const logs = []
+  const trustedContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 0,
+        category: "safe",
+        reason_codes: [],
+        explanation: "benin",
+      }),
+    }), { status: 200 })
+  }, {
+    logSink(args) {
+      logs.push(args)
+    },
+  })
+  const env = makeEnv({
+    openAIKey: "test-key",
+    trustedDomainRows: [
+      trustedDomainRow("laposte.fr", { brand_key: "laposte", trust_level: "high" }),
+    ],
+  })
+  const result = await postJson(trustedContext, env, "/ai/sms/analyze", {
+    message: "Votre colis La Poste est expedie. Suivi https://laposte.fr/suivi",
+  })
+
+  const entry = logs.find((args) => args[0] === "sms_analyze_path")
+  const payload = JSON.parse(entry[1])
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 0)
+  assert.equal(decisionOf(result.payload).category, "safe")
+  assert.equal(decisionOf(result.payload).action, "allow")
+  assert.ok(reasonsOf(result.payload).includes("TRUSTED_DOMAIN"))
+  assert.ok(scoreOf(result.payload) <= 8)
+  assert.equal(payload.path, "trusted_domain_fast_allow")
+  assert.equal(payload.used_ai, false)
+})
+
+test("mixed trusted and unknown domains still reaches AI window", async () => {
+  let fetchCalls = 0
+  const mixedContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 40,
+        category: "unknown",
+        reason_codes: ["URL"],
+        explanation: "lien ambigu",
+      }),
+    }), { status: 200 })
+  })
+  const env = makeEnv({
+    openAIKey: "test-key",
+    trustedDomainRows: [
+      trustedDomainRow("laposte.fr", { brand_key: "laposte", trust_level: "high" }),
+    ],
+  })
+  const result = await postJson(mixedContext, env, "/ai/sms/analyze", {
+    message: "Voir https://laposte.fr https://example.com",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 1)
+  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
+  assert.equal(decisionOf(result.payload).action, "warn")
+})
+
 test("fraud trusted_domains row produces malicious-domain signal", async () => {
   const env = makeEnv({
     trustedDomainRows: [
