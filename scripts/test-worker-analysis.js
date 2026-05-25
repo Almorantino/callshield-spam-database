@@ -1091,6 +1091,24 @@ test("SMS report with domain writes feedback entity aggregates", async () => {
   assert.ok(aggregateRuns.every((run) => run.args[3] === 1))
 })
 
+test("test SMS report source does not feed feedback entity aggregates", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://dedupe-check-callshield.xyz",
+    source: "worker_post_deploy_test",
+    report_surface: "worker_validation",
+    reported_at: 1774000000000,
+    category: "fraud",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(result.payload.domains_count, 1)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 0)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 0)
+})
+
 test("duplicate SMS report does not increment feedback entity aggregates twice", async () => {
   const env = makeEnv()
   const body = {
@@ -1189,6 +1207,32 @@ test("iOS feedback batch without message aggregates only the number", async () =
   assert.equal(result.payload.inserted, 1)
   assert.deepEqual(aggregateEntityKeys(env), ["number:33162304180"])
   assert.equal(aggregateRuns[0].args[3], 1)
+})
+
+test("test feedback batch source stores event but skips aggregate", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/feedback", {
+    source: "ios",
+    events: [
+      {
+        event_id: "evt-test-source",
+        number_e164: "+33 1 62 30 41 80",
+        category: "spam",
+        source_context: "internal_test_batch",
+        created_at: 1774000000000,
+      },
+    ],
+  })
+
+  const feedbackEventInserts = env.__db.runs.filter((run) => run.sql.includes("INSERT INTO feedback_events"))
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.status, "ok")
+  assert.equal(result.payload.accepted, 1)
+  assert.equal(result.payload.inserted, 1)
+  assert.equal(feedbackEventInserts.length, 1)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 0)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 0)
 })
 
 test("duplicate iOS feedback batch event does not increment aggregate twice", async () => {

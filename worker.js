@@ -2636,6 +2636,28 @@ function feedbackAggregateDeltas(category) {
   return deltas
 }
 
+function isFeedbackAggregateSourceAllowed({ source = "", sourceContext = "", reportSurface = "" } = {}) {
+  const parts = [source, sourceContext, reportSurface]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+
+  if (parts.length === 0) return true
+
+  const blockedExactSources = new Set([
+    "worker_post_deploy_test",
+    "internal_test_batch",
+    "delta_fix_test",
+    "ultimate_test",
+    "brain_test",
+    "v2plus_test",
+    "export_test",
+    "stress_test",
+  ])
+  if (parts.some((part) => blockedExactSources.has(part))) return false
+
+  return !/(^|[_:\-\s])(test|debug|fixture|mock|validation|stress)([_:\-\s]|$)/.test(parts.join(" "))
+}
+
 function feedbackEntitiesFromInputs({ number = "", message = "", sourceUrl = "" } = {}) {
   const entities = []
   const seen = new Set()
@@ -2773,7 +2795,12 @@ async function persistFeedbackEntityAggregates(env, {
   category = "unknown",
   timestamp = Date.now(),
   dedupeKey = "",
+  source = "",
+  sourceContext = "",
+  reportSurface = "",
 } = {}) {
+  if (!isFeedbackAggregateSourceAllowed({ source, sourceContext, reportSurface })) return
+
   const entities = feedbackEntitiesFromInputs({ number, message, sourceUrl })
   for (const entity of entities) {
     const shouldAggregate = await markFeedbackEntityAggregateEvent(env, dedupeKey, entity, category, timestamp)
@@ -3004,6 +3031,8 @@ async function persistFeedbackBatchEvent(env, event) {
         category: event.primaryCategory,
         timestamp: event.createdAt,
         dedupeKey: `feedback_batch:${event.dedupeKey}`,
+        source: event.source,
+        sourceContext: event.sourceContext,
       })
     }
 
@@ -3156,6 +3185,8 @@ async function persistFeedbackEvent(env, {
       category: payload.primaryCategory,
       timestamp: createdAt,
       dedupeKey,
+      source: "worker_feedback",
+      sourceContext,
     })
 
     return true
@@ -4190,6 +4221,9 @@ async function handleNativeReport(env, body, forcedChannel = null) {
       category: feedbackCategory,
       timestamp: reportedAt,
       dedupeKey: `native_report:${channel}:${inputHash}:${feedbackCategory}`,
+      source,
+      sourceContext: reportSurface,
+      reportSurface,
     })
 
     return jsonResponse({
