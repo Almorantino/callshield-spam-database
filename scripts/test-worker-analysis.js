@@ -670,7 +670,7 @@ test("repeated payment pressure without number skips AI", async () => {
   assert.equal(decisionOf(result.payload).action, "warn")
 })
 
-test("account threat still reaches AI window", async () => {
+test("account threat without URL skips AI and stays warning", async () => {
   let fetchCalls = 0
   const aiContext = loadWorker(async () => {
     fetchCalls += 1
@@ -690,28 +690,35 @@ test("account threat still reaches AI window", async () => {
   })
 
   assert.equal(result.status, 200)
-  assert.equal(fetchCalls, 1)
-  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
-  assert.equal(decisionOf(result.payload).category, "fraud")
+  assert.equal(fetchCalls, 0)
+  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
+  assert.equal(decisionOf(result.payload).category, "unknown")
   assert.equal(decisionOf(result.payload).action, "warn")
 })
 
-test("OpenAI fallback cannot clear account threat warning", async () => {
+test("ambiguous URL still reaches AI window", async () => {
   let fetchCalls = 0
-  const fallbackContext = loadWorker(async () => {
+  const aiContext = loadWorker(async () => {
     fetchCalls += 1
-    return new Response(JSON.stringify({ output_text: "{not json" }), { status: 200 })
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        is_scam: false,
+        score: 40,
+        category: "unknown",
+        reason_codes: ["URL"],
+        explanation: "lien ambigu",
+      }),
+    }), { status: 200 })
   })
   const env = makeEnv({ openAIKey: "test-key" })
-  const result = await postJson(fallbackContext, env, "/ai/sms/analyze", {
-    message: "Suspension possible de votre compte.",
+  const result = await postJson(aiContext, env, "/ai/sms/analyze", {
+    message: "Consultez votre dossier sur https://example.com",
   })
 
   assert.equal(result.status, 200)
   assert.equal(fetchCalls, 1)
-  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
+  assert.equal(decisionOf(result.payload).decision_source, "fusion_enriched")
   assert.equal(decisionOf(result.payload).action, "warn")
-  assert.ok(scoreOf(result.payload) >= 35)
 })
 
 test("frequency counters preserve derived campaign and local graph scoring", async () => {
