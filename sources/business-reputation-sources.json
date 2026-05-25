@@ -1,0 +1,460 @@
+{
+  "schema_version": "business_reputation_sources_v1",
+  "updated_at": "2026-05-25T00:00:00Z",
+  "policy": {
+    "default_usage": "evidence_only",
+    "direct_blocking_allowed": false,
+    "person_runtime_scoring_allowed": false,
+    "trusted_domain_promotion_allowed": false,
+    "requires_consumer_evidence_for_company_risk": true,
+    "notes": "Public corporate data maps companies and mandates. Consumer complaint sources provide weighted evidence. Neither source class is a legal verdict or a direct block signal."
+  },
+  "person_seeds": [
+    {
+      "person_key": "yony_sitbon_1982_09",
+      "display_name": "Yony Sitbon",
+      "birth_month": "1982-09",
+      "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
+      "source_role": "corporate_graph_seed",
+      "runtime_scoring_allowed": false
+    },
+    {
+      "person_key": "moise_sitbon_1972_03",
+      "display_name": "Moise Sitbon",
+      "birth_month": "1972-03",
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "source_role": "corporate_graph_seed",
+      "runtime_scoring_allowed": false
+    },
+    {
+      "person_key": "kenny_sitbon_1978_03",
+      "display_name": "Kenny Sitbon",
+      "birth_month": "1978-03",
+      "pappers_url": "https://www.pappers.fr/dirigeant/kenny_sitbon_1978-03",
+      "source_role": "corporate_graph_seed",
+      "runtime_scoring_allowed": false
+    },
+    {
+      "person_key": "sylvain_sitbon_1945_08",
+      "display_name": "Sylvain Sitbon",
+      "birth_month": "1945-08",
+      "pappers_url": "https://www.pappers.fr/dirigeant/sylvain_sitbon_1945-08",
+      "source_role": "corporate_graph_seed",
+      "runtime_scoring_allowed": false
+    }
+  ],
+  "known_companies": [
+    {
+      "company_name": "ASSIST ELEC",
+      "siren": "934042581",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "president",
+      "activity_hint": "Activites juridiques / support administratif",
+      "risk_tags": ["energy", "telemarketing", "iban_collection", "subscription_or_sepa_risk"],
+      "candidate_reason": "Consumer evidence links this company/domain to energy-refund and IBAN collection patterns.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/entreprise/assist-elec-934042581",
+      "domains": ["assistelec.fr", "assistelec.be"],
+      "status": "evidence_confirmed"
+    },
+    {
+      "company_name": "FUZION",
+      "siren": "920450442",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists a finance/insurance auxiliary activity on the Yony Sitbon public page.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "VEE",
+      "siren": "880422522",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "ancien_dirigeant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists an insurance/finance auxiliary activity and prior mandate.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "LA COMPAGNIE DES ASSURANCES",
+      "siren": "801308024",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "CDA DEVELOPPEMENT",
+      "siren": "833786908",
+      "person_key": "yony_sitbon_1982_09",
+      "role": "gerant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/yony_sitbon_1982-09",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "SDPA",
+      "siren": "978426583",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "SMAD",
+      "siren": "978427680",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "ATVD",
+      "siren": "990944761",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "SMVD",
+      "siren": "990951816",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "SN2A",
+      "siren": "934056573",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "SOCIETE NOUVELLE DE VENTE DIRECTE",
+      "siren": "981018674",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites administratives et autres activites de soutien aux entreprises",
+      "risk_tags": ["direct_sales", "telemarketing"],
+      "candidate_reason": "Pappers lists a direct-sales/support activity; useful for future telemarketing reputation correlation.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "VENTE DIRECTE COMPANY",
+      "siren": "981018690",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites administratives et autres activites de soutien aux entreprises",
+      "risk_tags": ["direct_sales", "telemarketing"],
+      "candidate_reason": "Pappers lists a direct-sales/support activity; useful for future telemarketing reputation correlation.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "D M A",
+      "siren": "534807888",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites administratives et autres activites de soutien aux entreprises",
+      "risk_tags": ["support_services"],
+      "candidate_reason": "Pappers lists support-service activity; candidate only until consumer evidence exists.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "PLANET ASSURANCES",
+      "siren": "808394936",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "ancien_dirigeant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "FLANDRIN ASSURANCES",
+      "siren": "808353346",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "ancien_dirigeant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "GLOBENERGY",
+      "siren": "834020489",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "gerant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["energy", "insurance_finance"],
+      "candidate_reason": "Pappers lists an energy-adjacent company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "GESTION INTER ASSURANCES GROUPE",
+      "siren": "512099151",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists insurance activity and shared links with multiple related companies.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "LEADERSURE",
+      "siren": "988667812",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Prestations de services par vente a distance",
+      "risk_tags": ["remote_sales", "telemarketing", "support_services"],
+      "candidate_reason": "Pappers lists remote-service sales activity; candidate only until consumer evidence exists.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/entreprise/leadersure-988667812",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "ANAVIE",
+      "siren": "522965946",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "INTER ASSURANCE GROUPE SANTE",
+      "siren": "921228797",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance", "health_insurance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "OPTIWIN",
+      "siren": "934023938",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "president",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists the company in an insurance/finance auxiliary sector.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "K S M",
+      "siren": "752374223",
+      "person_key": "moise_sitbon_1972_03",
+      "role": "ancien_dirigeant",
+      "activity_hint": "Activites des sieges sociaux ; conseil de gestion",
+      "risk_tags": ["holding_or_management"],
+      "candidate_reason": "Pappers lists historical shared management links; candidate only.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/moise_sitbon_1972-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "P S 2 I",
+      "siren": "448267047",
+      "person_key": "kenny_sitbon_1978_03",
+      "role": "gerant",
+      "activity_hint": "Activites des services financiers, hors assurance et caisses de retraite",
+      "risk_tags": ["financial_services"],
+      "candidate_reason": "Pappers lists financial services activity.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/entreprise/p-s-2-i-448267047",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "S.P.S.",
+      "siren": "403591563",
+      "person_key": "kenny_sitbon_1978_03",
+      "role": "gerant",
+      "activity_hint": "Activites des services financiers, hors assurance et caisses de retraite",
+      "risk_tags": ["financial_services"],
+      "candidate_reason": "Pappers lists financial services activity and links to Kenny/Sylvain pages.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/kenny_sitbon_1978-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "GLOBALIANS",
+      "siren": "904691110",
+      "person_key": "kenny_sitbon_1978_03",
+      "role": "directeur_general",
+      "activity_hint": "Activites des sieges sociaux ; conseil de gestion",
+      "risk_tags": ["holding_or_management"],
+      "candidate_reason": "Pappers lists shared corporate management links.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/kenny_sitbon_1978-03",
+      "domains": [],
+      "status": "candidate"
+    },
+    {
+      "company_name": "INTER ASSURANCES GROUPE",
+      "siren": "493555437",
+      "person_key": "sylvain_sitbon_1945_08",
+      "role": "ancien_dirigeant",
+      "activity_hint": "Activites auxiliaires de services financiers et d'assurance",
+      "risk_tags": ["insurance_finance"],
+      "candidate_reason": "Pappers lists historical insurance/finance auxiliary activity.",
+      "runtime_scoring_allowed": false,
+      "pappers_url": "https://www.pappers.fr/dirigeant/sylvain_sitbon_1945-08",
+      "domains": [],
+      "status": "candidate"
+    }
+  ],
+  "consumer_evidence_sources": [
+    {
+      "source_id": "warning_trading_assistelec_sitbon_2026",
+      "source_name": "Warning Trading",
+      "source_url": "https://warning-trading.com/arnaque/assistelec-sitbon-avis-yony-kenny-scam/",
+      "evidence_type": "consumer_investigation_article",
+      "linked_companies": [
+        "934042581"
+      ],
+      "linked_domains": [
+        "assistelec.fr",
+        "assistelec.be"
+      ],
+      "observed_patterns": [
+        "energy_refund_prime",
+        "identity_collection",
+        "iban_collection",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.64,
+      "contested": true,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Contains allegations and a right of reply/contestation. Use as weighted evidence only."
+    },
+    {
+      "source_id": "signal_arnaques_assistelec_888736",
+      "source_name": "Signal-Arnaques",
+      "source_url": "https://www.signal-arnaques.com/scam/view/888736",
+      "evidence_type": "consumer_report",
+      "linked_companies": [
+        "934042581"
+      ],
+      "linked_domains": [
+        "assistelec.fr",
+        "assistelec.be"
+      ],
+      "linked_numbers": [
+        "+3228444239",
+        "+3228443504"
+      ],
+      "observed_patterns": [
+        "energy_refund_prime",
+        "iban_collection",
+        "telemarketing"
+      ],
+      "confidence_score": 0.7,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer report mentioning Assistelec, a 200 EUR energy prime/refund, IBAN request, and Belgian caller numbers."
+    },
+    {
+      "source_id": "test_achats_assistelec_complaints",
+      "source_name": "Test-Achats",
+      "source_url": "https://www.test-achats.be/plainte/entreprises/assistelec/6d71ccb4046252ed96",
+      "evidence_type": "consumer_complaints_page",
+      "linked_companies": [
+        "934042581"
+      ],
+      "linked_domains": [
+        "assistelec.be",
+        "assistelec.fr"
+      ],
+      "observed_patterns": [
+        "energy_refund_prime",
+        "subscription_or_sepa_risk",
+        "telemarketing"
+      ],
+      "confidence_score": 0.66,
+      "contested": false,
+      "allowed_usage": "business_reputation_evidence",
+      "notes": "Consumer complaints around energy prime/refund and monthly contract/subscription patterns."
+    }
+  ]
+}
