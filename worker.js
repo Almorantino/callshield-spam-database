@@ -2736,15 +2736,49 @@ async function persistFeedbackEntityAggregate(env, entity, category, timestamp) 
   }
 }
 
+async function markFeedbackEntityAggregateEvent(env, dedupeKey, entity, category, timestamp) {
+  const normalizedDedupeKey = String(dedupeKey || "").trim()
+  if (!env?.DB || !normalizedDedupeKey || !entity?.entityType || !entity?.entityValue) return true
+
+  try {
+    const result = await env.DB.prepare(`
+      INSERT OR IGNORE INTO feedback_entity_aggregate_events (
+        dedupe_key,
+        entity_type,
+        entity_value,
+        category,
+        created_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5)
+    `)
+      .bind(
+        normalizedDedupeKey,
+        entity.entityType,
+        entity.entityValue,
+        canonicalCategory(category),
+        aggregateTimestampSeconds(timestamp)
+      )
+      .run()
+
+    return Number(result?.meta?.changes || 0) > 0
+  } catch (error) {
+    console.error("feedback_entity_aggregate_event_mark_failed", error)
+    return true
+  }
+}
+
 async function persistFeedbackEntityAggregates(env, {
   number = "",
   message = "",
   sourceUrl = "",
   category = "unknown",
   timestamp = Date.now(),
+  dedupeKey = "",
 } = {}) {
   const entities = feedbackEntitiesFromInputs({ number, message, sourceUrl })
   for (const entity of entities) {
+    const shouldAggregate = await markFeedbackEntityAggregateEvent(env, dedupeKey, entity, category, timestamp)
+    if (!shouldAggregate) continue
+
     await persistFeedbackEntityAggregate(env, entity, category, timestamp)
   }
 }
@@ -2969,6 +3003,7 @@ async function persistFeedbackBatchEvent(env, event) {
         number: event.number,
         category: event.primaryCategory,
         timestamp: event.createdAt,
+        dedupeKey: `feedback_batch:${event.dedupeKey}`,
       })
     }
 
@@ -3120,6 +3155,7 @@ async function persistFeedbackEvent(env, {
       message,
       category: payload.primaryCategory,
       timestamp: createdAt,
+      dedupeKey,
     })
 
     return true
@@ -4145,12 +4181,15 @@ async function handleNativeReport(env, body, forcedChannel = null) {
       .bind(...bindValues)
       .run()
 
+    const feedbackCategory = feedbackCategoryFromNativeReport(body)
+
     await persistFeedbackEntityAggregates(env, {
       number,
       message,
       sourceUrl,
-      category: feedbackCategoryFromNativeReport(body),
+      category: feedbackCategory,
       timestamp: reportedAt,
+      dedupeKey: `native_report:${channel}:${inputHash}:${feedbackCategory}`,
     })
 
     return jsonResponse({

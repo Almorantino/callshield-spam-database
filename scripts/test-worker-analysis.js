@@ -71,6 +71,17 @@ class MockD1Statement {
   async run() {
     const normalized = normalizeSql(this.sql)
     this.db.runs.push({ sql: normalized, args: this.args })
+    if (this.db.options.feedbackEntityAggregateEventThrows && normalized.includes("feedback_entity_aggregate_events")) {
+      throw new Error("feedback entity aggregate event unavailable")
+    }
+    if (normalized.includes("feedback_entity_aggregate_events")) {
+      const eventKey = `${this.args[0]}:${this.args[1]}:${this.args[2]}`
+      if (this.db.feedbackEntityEventKeys.has(eventKey)) {
+        return { meta: { changes: 0 } }
+      }
+      this.db.feedbackEntityEventKeys.add(eventKey)
+      return { meta: { changes: 1 } }
+    }
     if (this.db.options.feedbackEntityAggregateThrows && normalized.includes("feedback_entity_aggregates")) {
       throw new Error("feedback entity aggregate unavailable")
     }
@@ -83,6 +94,7 @@ class MockD1 {
     this.options = options
     this.statements = []
     this.runs = []
+    this.feedbackEntityEventKeys = new Set()
   }
 
   prepare(sql) {
@@ -278,6 +290,10 @@ function reasonsOf(payload) {
 
 function feedbackEntityAggregateRuns(env) {
   return env.__db.runs.filter((run) => run.sql.includes("feedback_entity_aggregates"))
+}
+
+function feedbackEntityAggregateEventRuns(env) {
+  return env.__db.runs.filter((run) => run.sql.includes("feedback_entity_aggregate_events"))
 }
 
 function aggregateEntityKeys(env) {
@@ -1075,6 +1091,29 @@ test("SMS report with domain writes feedback entity aggregates", async () => {
   assert.ok(aggregateRuns.every((run) => run.args[3] === 1))
 })
 
+test("duplicate SMS report does not increment feedback entity aggregates twice", async () => {
+  const env = makeEnv()
+  const body = {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://secure-login-verif.xyz",
+    reported_at: 1774000000000,
+    category: "fraud",
+  }
+
+  const first = await postJson(context, env, "/sms/report", body)
+  const second = await postJson(context, env, "/sms/report", body)
+
+  assert.equal(first.status, 200)
+  assert.equal(second.status, 200)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 6)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 3)
+  assert.deepEqual(aggregateEntityKeys(env).sort(), [
+    "domain:secure-login-verif.xyz",
+    "number:33699999999",
+    "root_domain:secure-login-verif.xyz",
+  ])
+})
+
 test("SMS report without URL only aggregates the number entity", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/sms/report", {
@@ -1111,6 +1150,23 @@ test("legacy SMS feedback with URL aggregates number and domains", async () => {
   assert.ok(aggregateRuns.every((run) => run.args[2] === 1))
 })
 
+test("duplicate legacy SMS feedback does not increment feedback entity aggregates twice", async () => {
+  const env = makeEnv()
+  const body = {
+    number: "+33 6 99 99 99 99",
+    message: "Urgent verifiez votre compte http://secure-login-verif.xyz",
+    user_feedback: "confirmed_scam",
+  }
+
+  const first = await postJson(context, env, "/ai/sms/feedback", body)
+  const second = await postJson(context, env, "/ai/sms/feedback", body)
+
+  assert.equal(first.status, 200)
+  assert.equal(second.status, 200)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 6)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 3)
+})
+
 test("iOS feedback batch without message aggregates only the number", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/ai/sms/feedback", {
@@ -1135,6 +1191,32 @@ test("iOS feedback batch without message aggregates only the number", async () =
   assert.equal(aggregateRuns[0].args[3], 1)
 })
 
+test("duplicate iOS feedback batch event does not increment aggregate twice", async () => {
+  const env = makeEnv()
+  const result = await postJson(context, env, "/ai/sms/feedback", {
+    source: "ios",
+    events: [
+      {
+        event_id: "evt-duplicate",
+        number_e164: "+33 1 62 30 41 80",
+        category: "spam",
+        created_at: 1774000000000,
+      },
+      {
+        event_id: "evt-duplicate",
+        number_e164: "+33 1 62 30 41 80",
+        category: "spam",
+        created_at: 1774000000000,
+      },
+    ],
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.accepted, 2)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 2)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 1)
+})
+
 test("feedback entity aggregate D1 errors do not break SMS report JSON", async () => {
   const env = makeEnv({ feedbackEntityAggregateThrows: true })
   const result = await postJson(context, env, "/sms/report", {
@@ -1146,6 +1228,20 @@ test("feedback entity aggregate D1 errors do not break SMS report JSON", async (
   assert.equal(result.status, 200)
   assert.equal(result.payload.success, true)
   assert.equal(result.payload.domains_count, 1)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 3)
+})
+
+test("feedback entity dedupe D1 errors fall back to aggregate writes", async () => {
+  const env = makeEnv({ feedbackEntityAggregateEventThrows: true })
+  const result = await postJson(context, env, "/sms/report", {
+    number: "+33 6 99 99 99 99",
+    message: "Votre compte est bloque http://secure-login-verif.xyz",
+    reported_at: 1774000000000,
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.success, true)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 3)
   assert.equal(feedbackEntityAggregateRuns(env).length, 3)
 })
 
