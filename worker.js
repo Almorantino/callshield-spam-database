@@ -1905,14 +1905,16 @@ async function buildFinalAnalysis(env, {
     "DELIVERY_SCAM",
     "JOB_SCAM",
   ].includes(code))
-  const aiLowSafeOrUnknown =
-    aiScore !== null &&
-    aiScore < 35 &&
-    (aiCategory === "safe" || aiCategory === "unknown") &&
-    aiResult?.is_scam !== true
+  const aiUnavailableOrLowSafe =
+    aiScore === null ||
+    (
+      aiScore < 35 &&
+      (aiCategory === "safe" || aiCategory === "unknown") &&
+      aiResult?.is_scam !== true
+    )
 
   if (
-    aiLowSafeOrUnknown &&
+    aiUnavailableOrLowSafe &&
     hasSensitiveWorkerReason &&
     !trustedTransactional &&
     !(domainsTrusted && !hasCriticalFraudSignal)

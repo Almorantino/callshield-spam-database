@@ -521,6 +521,26 @@ test("safe AI cannot clear payment pressure warning", async () => {
   assert.equal(decisionOf(result).action, "warn")
 })
 
+test("OpenAI fallback cannot clear payment pressure warning", async () => {
+  let fetchCalls = 0
+  const fallbackContext = loadWorker(async () => {
+    fetchCalls += 1
+    return new Response(JSON.stringify({ output_text: "{not json" }), { status: 200 })
+  })
+  const env = makeEnv({ openAIKey: "test-key" })
+  const result = await postJson(fallbackContext, env, "/ai/sms/analyze", {
+    message: "Paiement requis pour votre livraison.",
+    number: "+33 6 00 00 00 04",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(fetchCalls, 1)
+  assert.ok(reasonsOf(result.payload).includes("PAYMENT_PRESSURE"))
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.equal(decisionOf(result.payload).decision_source, "heuristic_fallback_enriched")
+})
+
 test("safe AI cannot clear fake authority warning", async () => {
   const message = "Assistance securite: verifiez vos informations de compte."
   const heuristic = context.runHeuristic(message)
