@@ -165,6 +165,7 @@ function makeEnv(options = {}) {
     DB: db,
     OPENAI_API_KEY: options.openAIKey || "",
     OPENAI_MODEL: "gpt-5-mini",
+    OPENAI_FETCH_TIMEOUT_MS: options.openAITimeoutMs || "",
     DOMAIN_CHECK_API_KEY: options.domainCheckApiKey || "",
     DOMAIN_API_USER: options.domainApiUser || "",
     REPUTATION_API_KEY: options.reputationApiKey || "",
@@ -474,6 +475,13 @@ test("invalid OpenAI payload returns null", async () => {
   assert.equal(result, null)
 })
 
+test("OpenAI timeout budget defaults and clamps safely", () => {
+  assert.equal(context.openAIFetchTimeoutMs({}), 1500)
+  assert.equal(context.openAIFetchTimeoutMs({ OPENAI_FETCH_TIMEOUT_MS: "900" }), 900)
+  assert.equal(context.openAIFetchTimeoutMs({ OPENAI_FETCH_TIMEOUT_MS: "100" }), 500)
+  assert.equal(context.openAIFetchTimeoutMs({ OPENAI_FETCH_TIMEOUT_MS: "5000" }), 2500)
+})
+
 test("carrier lookup disabled by default does not fetch", async () => {
   let fetchCalls = 0
   const carrierContext = loadWorker(async () => {
@@ -521,7 +529,7 @@ test("safe AI cannot clear payment pressure warning", async () => {
   assert.equal(decisionOf(result).action, "warn")
 })
 
-test("OpenAI fallback cannot clear payment pressure warning", async () => {
+test("low-risk payment pressure skips OpenAI and stays warning", async () => {
   let fetchCalls = 0
   const fallbackContext = loadWorker(async () => {
     fetchCalls += 1
@@ -534,7 +542,7 @@ test("OpenAI fallback cannot clear payment pressure warning", async () => {
   })
 
   assert.equal(result.status, 200)
-  assert.equal(fetchCalls, 1)
+  assert.equal(fetchCalls, 0)
   assert.ok(reasonsOf(result.payload).includes("PAYMENT_PRESSURE"))
   assert.ok(scoreOf(result.payload) >= 35)
   assert.equal(decisionOf(result.payload).action, "warn")

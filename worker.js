@@ -1,6 +1,8 @@
 const JSON_HEADERS = { "Content-Type": "application/json" }
 const EXTERNAL_FETCH_TIMEOUT_MS = 1500
-const OPENAI_FETCH_TIMEOUT_MS = 2500
+const OPENAI_FETCH_TIMEOUT_MS = 1500
+const OPENAI_FETCH_TIMEOUT_MIN_MS = 500
+const OPENAI_FETCH_TIMEOUT_MAX_MS = 2500
 const APPLE_APP_SITE_ASSOCIATION = {
   messagefilter: {
     apps: [
@@ -142,6 +144,15 @@ async function fetchWithTimeout(resource, options = {}, timeoutMs = EXTERNAL_FET
   } finally {
     clearTimeout(timeoutId)
   }
+}
+
+function openAIFetchTimeoutMs(env) {
+  const configured = Number(env?.OPENAI_FETCH_TIMEOUT_MS)
+  if (!Number.isFinite(configured)) return OPENAI_FETCH_TIMEOUT_MS
+  return Math.max(
+    OPENAI_FETCH_TIMEOUT_MIN_MS,
+    Math.min(OPENAI_FETCH_TIMEOUT_MAX_MS, Math.round(configured))
+  )
 }
 
 
@@ -1475,7 +1486,7 @@ async function callOpenAI(env, message, number, analysisContext = null) {
           },
         },
       }),
-    }, OPENAI_FETCH_TIMEOUT_MS)
+    }, openAIFetchTimeoutMs(env))
 
     if (!response.ok) return null
 
@@ -3077,13 +3088,34 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   ]
 
 
-  if (enrichedHeuristicScore <= 35 && !requiresAIReviewForLowScore(message, combinedReasons)) {
+  const lowScoreNeedsAIReview = requiresAIReviewForLowScore(message, combinedReasons)
+  const canUseSensitiveLowRiskFastWarn =
+    enrichedHeuristicScore <= 35 &&
+    lowScoreNeedsAIReview &&
+    Boolean(number) &&
+    !appleFastBudget &&
+    !baseHasUrl &&
+    !baseHasUrgency &&
+    !baseHasAccountThreat &&
+    !baseHasShortener &&
+    !trustedTransactional
+
+  if (enrichedHeuristicScore <= 35 && (!lowScoreNeedsAIReview || canUseSensitiveLowRiskFastWarn)) {
+    const lowRiskHeuristicScore = canUseSensitiveLowRiskFastWarn
+      ? Math.max(enrichedHeuristicScore, 35)
+      : enrichedHeuristicScore
+    const lowRiskDecisionSource = canUseSensitiveLowRiskFastWarn
+      ? "heuristic_fallback_enriched"
+      : "heuristic_low_risk_enriched"
+    const lowRiskExplanation = canUseSensitiveLowRiskFastWarn
+      ? "Décision heuristique rapide pour signal sensible faible."
+      : "Risque faible à modéré détecté avec enrichissement local."
     const rawResult = await buildFinalAnalysis(env, {
-      heuristicScore: enrichedHeuristicScore,
+      heuristicScore: lowRiskHeuristicScore,
       heuristicReasons: combinedReasons,
       aiResult: null,
-      decisionSource: "heuristic_low_risk_enriched",
-      explanation: "Risque faible à modéré détecté avec enrichissement local.",
+      decisionSource: lowRiskDecisionSource,
+      explanation: lowRiskExplanation,
       sourceMessage: message,
       precomputedDomains: baseDomains,
       precomputedTrustContext: baseTrustContext,
@@ -3091,7 +3123,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
 
     const result = finalizeCanonicalAnalysisResult(rawResult, {
       inputHash,
-      modelVersion: "fast_v2",
+      modelVersion: canUseSensitiveLowRiskFastWarn ? "fast_sensitive_v1" : "fast_v2",
       processingTimeMs: Date.now() - startedAt,
     })
 
@@ -3103,7 +3135,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       number_e164: number || null,
       message,
       normalized_message: normalizedMessage,
-      heuristic_score: enrichedHeuristicScore,
+      heuristic_score: lowRiskHeuristicScore,
       ai_score: null,
       final_score: getAnalysisScore(result),
       risk_level: lowRiskDecision.risk_level,
@@ -3111,14 +3143,14 @@ async function handleSMSAnalyze(env, body, ctx = null) {
       category: lowRiskDecision.category,
       decision_source: lowRiskDecision.decision_source,
       model: lowRiskMeta.model,
-      model_version: lowRiskMeta.model_version || "fast_v2",
+      model_version: lowRiskMeta.model_version || (canUseSensitiveLowRiskFastWarn ? "fast_sensitive_v1" : "fast_v2"),
       reason_codes_json: JSON.stringify(lowRiskDecision.reason_codes || []),
       explanation: lowRiskDecision.explanation || "",
       user_feedback: null,
       reviewed_label: null,
     })
 
-    monitorPath = "heuristic_low_risk_enriched"
+    monitorPath = canUseSensitiveLowRiskFastWarn ? "sensitive_low_risk_fast_warn" : "heuristic_low_risk_enriched"
     logSMSAnalyzePath({
       path: monitorPath,
       number,
