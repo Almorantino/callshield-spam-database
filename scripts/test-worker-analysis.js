@@ -482,6 +482,24 @@ test("sms analysis persistence is scheduled with waitUntil", async () => {
   assert.equal(env.__db.runs.length, 2)
 })
 
+test("worker validation analysis skips learning persistence", async () => {
+  const env = makeEnv()
+  const scheduled = []
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    source: "worker_validation",
+    message: "Bonjour, votre rendez-vous est confirme demain a 14h.",
+  }, {
+    waitUntil(promise) {
+      scheduled.push(Promise.resolve(promise))
+    },
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(decisionOf(result.payload).action, "allow")
+  assert.equal(scheduled.length, 0)
+  assert.equal(env.__db.runs.length, 0)
+})
+
 test("OTP-only SMS stays safe/allow", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/ai/sms/analyze", {

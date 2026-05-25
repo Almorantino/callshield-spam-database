@@ -3651,10 +3651,23 @@ function isAppleMessageFilterAnalyzeBody(body) {
   )
 }
 
+function isSMSAnalyzeValidationOnly(body) {
+  const source = String(body?.source || body?.report_surface || body?.query?.source || "")
+    .trim()
+    .toLowerCase()
+  return [
+    "worker_validation",
+    "worker_post_deploy_test",
+    "post_deploy_test",
+    "synthetic_test",
+  ].includes(source)
+}
+
 async function handleSMSAnalyze(env, body, ctx = null) {
   const message = smsAnalyzeMessageFromBody(body)
   const number = smsAnalyzeNumberFromBody(body)
   const appleFastBudget = isAppleMessageFilterAnalyzeBody(body)
+  const persistAnalysis = !isSMSAnalyzeValidationOnly(body)
 
   if (!message) {
     return jsonResponse({ error: "missing message" }, 400)
@@ -3664,6 +3677,10 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   let monitorPath = "unknown"
   const normalizedMessage = message.toLowerCase()
   const inputHash = await sha256Hex(`${number}|${normalizedMessage}`)
+  const scheduleAnalyzePersistence = (row) => {
+    if (!persistAnalysis) return Promise.resolve()
+    return scheduleSMSAnalysisPersistence(ctx, env, row)
+  }
 
   const baseHeuristic = runHeuristic(message)
   const baseDomains = collectMessageDomains(message)
@@ -3758,7 +3775,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const decision = getAnalysisDecision(result)
     const meta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -3834,7 +3851,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const fastDecisionData = getAnalysisDecision(result)
     const fastMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4001,7 +4018,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const lowRiskDecision = getAnalysisDecision(result)
     const lowRiskMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4058,7 +4075,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const highRiskDecision = getAnalysisDecision(result)
     const highRiskMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4118,7 +4135,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const appleDecision = getAnalysisDecision(result)
     const appleMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4180,7 +4197,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const trustedDecision = getAnalysisDecision(result)
     const trustedMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4255,7 +4272,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const fusionDecision = getAnalysisDecision(result)
     const fusionMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
@@ -4312,7 +4329,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     const fallbackDecision = getAnalysisDecision(result)
     const fallbackMeta = getAnalysisMeta(result)
 
-    await scheduleSMSAnalysisPersistence(ctx, env, {
+    await scheduleAnalyzePersistence({
       input_hash: inputHash,
       number_e164: number || null,
       message,
