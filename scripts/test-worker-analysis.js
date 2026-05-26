@@ -134,6 +134,13 @@ class MockD1 {
       return { results: this.options.feedbackEntityAggregateRows || [] }
     }
 
+    if (normalized.includes("FROM number_prefix_reputation")) {
+      if (this.options.numberPrefixReputationThrows) {
+        throw new Error("number prefix reputation unavailable")
+      }
+      return { results: this.options.numberPrefixReputationRows || [] }
+    }
+
     if (normalized.includes("FROM external_url_evidence_aggregates")) {
       if (this.options.externalUrlEvidenceThrows) {
         throw new Error("external URL evidence unavailable")
@@ -1508,6 +1515,105 @@ test("live lookup telemarketing prevents SMS fast allow", async () => {
   assert.notEqual(decisionOf(result.payload).action, "block")
 })
 
+test("live lookup exact match skips number prefix reputation read", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      category: "fraud",
+      confidence: 0.99,
+      risk_level: 95,
+    },
+    numberPrefixReputationRows: [
+      {
+        prefix: "332702",
+        prefix_length: 6,
+        category: "fraud",
+        risk_level: 75,
+        confidence: 0.99,
+        evidence_count: 98736,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33270200000",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_FRAUD_NUMBER"))
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM number_prefix_reputation")))
+})
+
+test("number prefix fraud reputation prevents SMS fast allow without blocking alone", async () => {
+  const env = makeEnv({
+    numberPrefixReputationRows: [
+      {
+        prefix: "332702",
+        prefix_length: 6,
+        category: "fraud",
+        risk_level: 75,
+        confidence: 0.99,
+        evidence_count: 98736,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33270299999",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_FRAUD_NUMBER"))
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.ok(scoreOf(result.payload) < 70)
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM number_prefix_reputation")))
+})
+
+test("number prefix telemarketing reputation warns but does not block", async () => {
+  const env = makeEnv({
+    numberPrefixReputationRows: [
+      {
+        prefix: "3316200",
+        prefix_length: 7,
+        category: "telemarketing",
+        risk_level: 60,
+        confidence: 0.85,
+        evidence_count: 1000,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33162001234",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("TELEMARKETING_PATTERN"))
+  assert.equal(decisionOf(result.payload).category, "telemarketing")
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+})
+
+test("weak number prefix reputation is neutral", async () => {
+  const env = makeEnv({
+    numberPrefixReputationRows: [
+      {
+        prefix: "3368349",
+        prefix_length: 7,
+        category: "fraud",
+        risk_level: 70,
+        confidence: 0.75,
+        evidence_count: 2,
+      },
+    ],
+  })
+  const result = await context.analyzeNumberPrefixReputationSignals(env, "+33683491234")
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
 test("SMS analysis without number does not read live lookup", async () => {
   const env = makeEnv({
     liveLookupRow: {
@@ -1522,6 +1628,7 @@ test("SMS analysis without number does not read live lookup", async () => {
 
   assert.equal(result.status, 200)
   assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM live_lookup")))
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM number_prefix_reputation")))
   assert.equal(decisionOf(result.payload).action, "allow")
 })
 

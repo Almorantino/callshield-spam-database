@@ -1228,6 +1228,69 @@ async function analyzeLiveLookupNumberSignals(env, number = "") {
   }
 }
 
+function numberPrefixCandidates(number = "") {
+  const normalizedNumber = normalizeNumber(number)
+  if (!normalizedNumber) return []
+
+  return [...new Set([
+    normalizedNumber.slice(0, 7),
+    normalizedNumber.slice(0, 6),
+  ].filter((prefix) => prefix.length >= 6))]
+}
+
+async function analyzeNumberPrefixReputationSignals(env, number = "") {
+  const prefixes = numberPrefixCandidates(number)
+  if (!env?.DB || prefixes.length === 0) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const rows = await env.DB.prepare(`
+      SELECT
+        prefix,
+        prefix_length,
+        category,
+        risk_level,
+        confidence,
+        evidence_count
+      FROM number_prefix_reputation
+      WHERE prefix IN (${prefixes.map(() => "?").join(",")})
+      ORDER BY prefix_length DESC, risk_level DESC
+      LIMIT 5
+    `)
+      .bind(...prefixes)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let score = 0
+    const reasons = []
+
+    for (const row of results) {
+      const category = canonicalCategory(row?.category)
+      const riskLevel = Number(row?.risk_level || 0)
+      const confidence = Number(row?.confidence || 0)
+      const evidenceCount = Number(row?.evidence_count || 0)
+      const usableConfidence = confidence <= 0 || confidence >= 0.7
+
+      if (category === "fraud" && riskLevel >= 70 && evidenceCount >= 10 && usableConfidence) {
+        score = Math.max(score, 35)
+        reasons.push("KNOWN_FRAUD_NUMBER")
+      } else if (category === "spam" && riskLevel >= 60 && evidenceCount >= 10 && usableConfidence) {
+        score = Math.max(score, 35)
+        reasons.push("KNOWN_SPAM_NUMBER")
+      } else if (category === "telemarketing" && riskLevel >= 45 && evidenceCount >= 10 && usableConfidence) {
+        score = Math.max(score, 35)
+        reasons.push("TELEMARKETING_PATTERN")
+      }
+    }
+
+    return { score, reasons: uniqueReasonCodes(reasons) }
+  } catch (error) {
+    console.error("number_prefix_reputation_lookup_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
 async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
   const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))].slice(0, 10)
   if (!env?.DB || normalizedDomains.length === 0) {
@@ -4031,6 +4094,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const earlyLiveNumber = shouldLookupLiveNumberEarly
     ? await analyzeLiveLookupNumberSignals(env, number)
     : { score: 0, reasons: [] }
+  const shouldLookupNumberPrefixEarly = Boolean(number) && earlyLiveNumber.score === 0
+  if (shouldLookupNumberPrefixEarly) {
+    d1ReadsEstimate += 1
+  }
+  const earlyNumberPrefix = shouldLookupNumberPrefixEarly
+    ? await analyzeNumberPrefixReputationSignals(env, number)
+    : { score: 0, reasons: [] }
   const shouldLookupFeedbackNumberEarly = Boolean(number) && !trustedTransactional
   if (shouldLookupFeedbackNumberEarly) {
     d1ReadsEstimate += 1
@@ -4043,14 +4113,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     uniqueReasonCodes([
       ...baseHeuristicWithReputation.reasonCodes,
       ...earlyLiveNumber.reasons,
+      ...earlyNumberPrefix.reasons,
     ])
   )
   const baseHeuristicWithEarlyReputation = {
-    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score + earlyLiveNumber.score + earlyFeedbackNumber.score),
+    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score + earlyLiveNumber.score + earlyNumberPrefix.score + earlyFeedbackNumber.score),
     reasonCodes: uniqueReasonCodes([
       ...baseHeuristicWithReputation.reasonCodes,
       ...earlyBusinessReputation.reasons,
       ...earlyLiveNumber.reasons,
+      ...earlyNumberPrefix.reasons,
       ...earlyFeedbackNumber.reasons,
     ]),
   }
@@ -4067,12 +4139,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseHeuristicWithEarlyReputation.score <= 80
 
   if (clearTelemarketingFastPath) {
-    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score + earlyLiveNumber.score + earlyFeedbackNumber.score)
+    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score + earlyLiveNumber.score + earlyNumberPrefix.score + earlyFeedbackNumber.score)
     const telemarketingReasons = uniqueReasonCodes([
       ...baseHeuristic.reasonCodes,
       ...baseDomainReputation.reasons,
       ...earlyBusinessReputation.reasons,
       ...earlyLiveNumber.reasons,
+      ...earlyNumberPrefix.reasons,
       ...earlyFeedbackNumber.reasons,
       "TELEMARKETING_PATTERN",
     ])
@@ -4149,6 +4222,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseHasTelemarketing ||
     earlyBusinessReputation.score > 0 ||
     earlyLiveNumber.score > 0 ||
+    earlyNumberPrefix.score > 0 ||
     earlyFeedbackNumber.score > 0
 
   const localFrequencyReadsEstimate = trustedTransactional || !suspiciousCore
