@@ -297,6 +297,35 @@ def build_live_lookup_export(conn, limit: int = 250_000):
     return items
 
 
+def live_lookup_export_has_prefix_supplements(path, prefixes):
+    if not prefixes:
+        return True
+    if not path.exists():
+        return False
+
+    required_count = min(
+        LIVE_LOOKUP_PREFIX_SUPPLEMENT_MIN_COUNT,
+        LIVE_LOOKUP_PREFIX_SUPPLEMENT_PER_PREFIX_LIMIT,
+    )
+    counts = {prefix: 0 for prefix in prefixes}
+
+    try:
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                number = str(row.get("number_e164") or "")
+                category = str(row.get("category") or "").strip().lower()
+                if category not in {"telemarketing", "demarchage", "démarchage"}:
+                    continue
+                for prefix in counts:
+                    if number.startswith(prefix):
+                        counts[prefix] += 1
+    except Exception:
+        return False
+
+    return all(count >= required_count for count in counts.values())
+
+
 # ------------------------------------------------------------
 # incremental helpers
 # ------------------------------------------------------------
@@ -771,18 +800,26 @@ def main():
 
         # Skip rebuild only when the exported dataset delta is strictly zero
         delta = device.get("delta", {}) or {}
+        supplement_prefixes = fetch_official_telemarketing_cluster_prefixes(conn)
+        live_lookup_supplements_present = live_lookup_export_has_prefix_supplements(
+            LIVE_LOOKUP_FILE,
+            supplement_prefixes,
+        )
         live_lookup_unchanged = (
             device.get("incremental_mode")
             and int(delta.get("added_blocks", 0)) == 0
             and int(delta.get("removed_blocks", 0)) == 0
             and int(delta.get("added_identify", 0)) == 0
             and int(delta.get("removed_identify", 0)) == 0
+            and live_lookup_supplements_present
         )
 
         if live_lookup_unchanged:
             print("ℹ️ live lookup unchanged — skipping rebuild")
             live_lookup_export = []
         else:
+            if supplement_prefixes and not live_lookup_supplements_present:
+                print("ℹ️ live lookup prefix supplements missing — forcing rebuild")
             live_lookup_export = build_live_lookup_export(conn, limit=100_000)
             LIVE_LOOKUP_FILE.parent.mkdir(parents=True, exist_ok=True)
             with LIVE_LOOKUP_FILE.open("w", encoding="utf-8", newline="") as f:
