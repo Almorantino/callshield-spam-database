@@ -9,3 +9,5 @@ node_modules/
 data/raw-source-database.json
 data/scored-database.json
 data/live-caller-id-pir/
+data/device-state.json
+scripts/.wrangler/cache/
