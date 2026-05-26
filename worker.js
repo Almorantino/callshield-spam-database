@@ -1855,6 +1855,52 @@ async function fallbackFeedback(env, number) {
   return null
 }
 
+async function fallbackFeedbackEntityAggregate(env, number) {
+  try {
+    const rows = await env.DB.prepare(`
+      SELECT
+        fraud_count,
+        spam_count,
+        telemarketing_count,
+        safe_count,
+        controversy_score
+      FROM feedback_entity_aggregates
+      WHERE entity_type = 'number'
+        AND entity_value = ?1
+    `)
+      .bind(number)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let fraudCount = 0
+    let spamCount = 0
+    let telemarketingCount = 0
+    let safeCount = 0
+    let controversyScore = 0
+
+    for (const row of results) {
+      fraudCount = Math.max(fraudCount, Number(row?.fraud_count || 0))
+      spamCount = Math.max(spamCount, Number(row?.spam_count || 0))
+      telemarketingCount = Math.max(telemarketingCount, Number(row?.telemarketing_count || 0))
+      safeCount = Math.max(safeCount, Number(row?.safe_count || 0))
+      controversyScore = Math.max(controversyScore, Number(row?.controversy_score || 0))
+    }
+
+    const positiveCount = fraudCount + spamCount + telemarketingCount
+    if (positiveCount <= 0 || safeCount > 0 || controversyScore > 0) return null
+
+    if (fraudCount >= 1) return buildResponse("Fraude probable", "fraud", 0.85)
+    if (telemarketingCount >= spamCount && telemarketingCount >= 1) {
+      return buildResponse("Démarchage probable", "telemarketing", 0.75)
+    }
+    if (spamCount >= 1) return buildResponse("Spam probable", "spam", 0.75)
+  } catch (error) {
+    console.error("feedback_entity_lookup_failed", error)
+  }
+
+  return null
+}
+
 async function fallbackReports(env, number) {
   try {
     const smsReportColumns = await getTableColumns(env, "sms_reports")
@@ -4860,6 +4906,9 @@ async function handleLookup(env, phoneNumber) {
 
   const feedback = await fallbackFeedback(env, number)
   if (feedback) return feedback
+
+  const feedbackEntity = await fallbackFeedbackEntityAggregate(env, number)
+  if (feedbackEntity) return feedbackEntity
 
   const reports = await fallbackReports(env, number)
   if (reports) return reports

@@ -2132,6 +2132,131 @@ test("live caller lookup with no match returns stable empty JSON", async () => {
   })
 })
 
+test("live caller lookup uses telemarketing feedback entity aggregate", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 0,
+        telemarketing_count: 1,
+        safe_count: 0,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/live-caller-id/lookup", {
+    phone_number: "33377131029",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.match, true)
+  assert.equal(result.payload.category, "telemarketing")
+  assert.equal(result.payload.confidence, 0.75)
+})
+
+test("live caller lookup uses fraud feedback entity aggregate", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 1,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/live-caller-id/lookup", {
+    phone_number: "33611111111",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.match, true)
+  assert.equal(result.payload.category, "fraud")
+  assert.equal(result.payload.confidence, 0.85)
+})
+
+test("live caller lookup ignores conflicted feedback entity aggregate", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 1,
+        telemarketing_count: 1,
+        safe_count: 1,
+        controversy_score: 1,
+      },
+    ],
+    tableColumns: {
+      ...defaultTableColumns,
+      sms_reports: ["id", "number_e164", "created_at"],
+    },
+  })
+  const result = await postJson(context, env, "/live-caller-id/lookup", {
+    phone_number: "33611111111",
+  })
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.payload, {
+    match: false,
+    label: null,
+    category: null,
+    confidence: 0,
+  })
+})
+
+test("live caller lookup keeps live lookup priority over feedback entity aggregate", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      label: "Fraude probable",
+      category: "fraud",
+      confidence: 0.99,
+    },
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 0,
+        telemarketing_count: 1,
+        safe_count: 0,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/live-caller-id/lookup", {
+    phone_number: "33270292210",
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(result.payload.match, true)
+  assert.equal(result.payload.category, "fraud")
+  assert.equal(result.payload.confidence, 0.99)
+  assert.equal(
+    env.__db.statements.some((sql) => sql.includes("feedback_entity_aggregates")),
+    false
+  )
+})
+
+test("live caller lookup feedback entity aggregate errors stay empty", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateThrows: true,
+    tableColumns: {
+      ...defaultTableColumns,
+      sms_reports: ["id", "number_e164", "created_at"],
+    },
+  })
+  const result = await postJson(context, env, "/live-caller-id/lookup", {
+    phone_number: "33611111111",
+  })
+
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.payload, {
+    match: false,
+    label: null,
+    category: null,
+    confidence: 0,
+  })
+})
+
 ;(async () => {
   let failed = 0
 
