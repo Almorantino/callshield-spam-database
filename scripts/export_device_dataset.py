@@ -385,26 +385,83 @@ def build_unchanged_device_dataset(previous_state):
 
 
 def build_sms_filter_numbers(device):
-    # SMS-specific selection (V2+): focus on FR mobile ranges and cap size
+    # Deprecated compatibility path. SMS export must not depend on the CallKit
+    # dataset, which is capped and dominated by non-mobile prefixes.
+    return []
+
+
+def is_sms_filter_candidate_number(normalized):
+    if not (normalized.startswith("336") or normalized.startswith("337")):
+        return False
+
+    subscriber = normalized[3:]
+    if subscriber in {"00000000", "11111111", "12345678", "23456789"}:
+        return False
+    if len(set(subscriber)) == 1:
+        return False
+
+    return True
+
+
+def build_sms_filter_numbers_from_scored(conn):
+    # SMS-specific selection (V2+): focus on FR mobile ranges and cap size.
     MAX_SMS_NUMBERS = 200_000
+    SMS_CANDIDATE_FETCH_LIMIT = MAX_SMS_NUMBERS + 10_000
+    columns = raw_numbers_columns(conn)
+    select_feedback_fields = feedback_select_fields("r", columns)
+
+    query = f"""
+        SELECT
+            s.number,
+            s.score,
+            s.category,
+            s.reports,
+            {select_feedback_fields},
+            s.source_confidence,
+            s.last_seen,
+            r.source,
+            r.source_detail,
+            r.prefix_official,
+            r.scam_flag
+        FROM scored_numbers s
+        LEFT JOIN raw_numbers r ON r.number = s.number
+        WHERE s.action = 'block'
+          AND lower(COALESCE(s.category, 'unknown')) != 'safe'
+          AND (
+              CAST(s.number AS TEXT) LIKE '336%'
+              OR CAST(s.number AS TEXT) LIKE '337%'
+          )
+        ORDER BY
+            fraud_reports DESC,
+            telemarketing_reports DESC,
+            safe_reports ASC,
+            r.scam_flag DESC,
+            r.prefix_official DESC,
+            s.source_confidence DESC,
+            s.reports DESC,
+            s.score DESC,
+            s.last_seen DESC,
+            s.number ASC
+        LIMIT ?
+    """
 
     candidates = []
-    for n in device.get("blocked_numbers", []):
-        s = str(n)
-        if not s.isdigit():
+    seen = set()
+    for row in conn.execute(query, (SMS_CANDIDATE_FETCH_LIMIT,)):
+        normalized = normalize_callkit_number(row["number"])
+        if not normalized:
             continue
-        # Focus on French mobile numbers (E.164 without +): 336 / 337
-        if s.startswith("336") or s.startswith("337"):
-            candidates.append(int(s))
+        if not is_sms_filter_candidate_number(normalized):
+            continue
+        number = int(normalized)
+        if number in seen:
+            continue
+        seen.add(number)
+        candidates.append(number)
+        if len(candidates) >= MAX_SMS_NUMBERS:
+            break
 
-    # Deduplicate and keep deterministic order
-    candidates = sorted(set(candidates))
-
-    # Cap for extension performance
-    if len(candidates) > MAX_SMS_NUMBERS:
-        candidates = candidates[:MAX_SMS_NUMBERS]
-
-    return candidates
+    return sorted(candidates)
 
 
 def write_sms_filter_sqlite(db_path, version, generated_at, numbers):
@@ -428,6 +485,7 @@ def write_sms_filter_sqlite(db_path, version, generated_at, numbers):
                 ("version", str(int(version))),
                 ("generated_at", str(generated_at)),
                 ("numbers_count", str(len(numbers))),
+                ("selection", "scored_mobile_block_v1"),
             ],
         )
         conn.commit()
@@ -790,7 +848,7 @@ def main():
             json.dump(device, f, ensure_ascii=False, separators=(",", ":"))
             f.write("\n")
 
-        sms_filter_numbers = build_sms_filter_numbers(device)
+        sms_filter_numbers = build_sms_filter_numbers_from_scored(conn)
         write_sms_filter_sqlite(
             SMS_FILTER_FILE,
             device.get("version", 1),
