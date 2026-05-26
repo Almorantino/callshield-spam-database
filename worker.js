@@ -5020,6 +5020,16 @@ async function handleNativeReport(env, body, forcedChannel = null) {
       validationStatus: "accepted",
     })
 
+    await persistFeedbackEntityAggregates(env, {
+      number,
+      category: feedbackCategory,
+      timestamp: reportedAt,
+      dedupeKey: `native_report:${channel}:${inputHash}:${feedbackCategory}`,
+      source,
+      sourceContext: reportSurface,
+      reportSurface,
+    })
+
     return jsonResponse({
       success: true,
       channel,

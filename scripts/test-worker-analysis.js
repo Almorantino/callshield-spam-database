@@ -1891,7 +1891,7 @@ test("SMS report without URL only aggregates the number entity", async () => {
   assert.deepEqual(keys, ["number:33611223344"])
 })
 
-test("call report writes source aggregate without entity aggregate", async () => {
+test("call report writes source and number entity aggregates", async () => {
   const env = makeEnv()
   const result = await postJson(context, env, "/call/report", {
     number: "+33 6 11 22 33 44",
@@ -1900,14 +1900,35 @@ test("call report writes source aggregate without entity aggregate", async () =>
   })
 
   const sourceRuns = feedbackSourceAggregateRuns(env)
+  const keys = aggregateEntityKeys(env)
 
   assert.equal(result.status, 200)
   assert.equal(result.payload.success, true)
   assert.equal(result.payload.channel, "call")
-  assert.equal(feedbackEntityAggregateRuns(env).length, 0)
+  assert.deepEqual(keys, ["number:33611223344"])
+  assert.equal(feedbackEntityAggregateRuns(env).length, 1)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 1)
   assert.equal(sourceRuns.length, 1)
   assert.equal(sourceRuns[0].args[5], "call")
   assert.equal(sourceRuns[0].args[9], 1)
+})
+
+test("duplicate call report does not increment feedback entity aggregate twice", async () => {
+  const env = makeEnv()
+  const body = {
+    number: "+33 6 11 22 33 44",
+    reported_at: 1774000000000,
+    category: "spam",
+  }
+
+  const first = await postJson(context, env, "/call/report", body)
+  const second = await postJson(context, env, "/call/report", body)
+
+  assert.equal(first.status, 200)
+  assert.equal(second.status, 200)
+  assert.equal(feedbackEntityAggregateEventRuns(env).length, 2)
+  assert.equal(feedbackEntityAggregateRuns(env).length, 1)
+  assert.deepEqual(aggregateEntityKeys(env), ["number:33611223344"])
 })
 
 test("legacy SMS feedback with URL aggregates number and domains", async () => {
