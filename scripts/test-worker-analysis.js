@@ -1446,6 +1446,85 @@ test("number feedback conflicting signals are neutral", async () => {
   assert.deepEqual(Array.from(result.reasons), [])
 })
 
+test("live lookup fraud prevents SMS fast allow without blocking alone", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      category: "fraud",
+      confidence: 0.99,
+      risk_level: 95,
+    },
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33270200000",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_FRAUD_NUMBER"))
+  assert.ok(scoreOf(result.payload) >= 35)
+  assert.ok(scoreOf(result.payload) < 70)
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM live_lookup")))
+})
+
+test("live lookup spam prevents SMS fast allow", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      category: "spam",
+      confidence: 0.9,
+      risk_level: 85,
+    },
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33948000000",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_SPAM_NUMBER"))
+  assert.equal(decisionOf(result.payload).category, "spam")
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+})
+
+test("live lookup telemarketing prevents SMS fast allow", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      category: "telemarketing",
+      confidence: 0.9,
+      risk_level: 80,
+    },
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "+33162000000",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("TELEMARKETING_PATTERN"))
+  assert.equal(decisionOf(result.payload).category, "telemarketing")
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+})
+
+test("SMS analysis without number does not read live lookup", async () => {
+  const env = makeEnv({
+    liveLookupRow: {
+      category: "fraud",
+      confidence: 0.99,
+      risk_level: 95,
+    },
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM live_lookup")))
+  assert.equal(decisionOf(result.payload).action, "allow")
+})
+
 test("SMS analysis without number does not read number feedback aggregate", async () => {
   const env = makeEnv({
     feedbackEntityAggregateRows: [

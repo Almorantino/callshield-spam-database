@@ -1186,6 +1186,48 @@ async function analyzeFeedbackNumberSignals(env, number = "") {
   }
 }
 
+async function analyzeLiveLookupNumberSignals(env, number = "") {
+  const normalizedNumber = normalizeNumber(number)
+  if (!env?.DB || !normalizedNumber) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const row = await env.DB.prepare(`
+      SELECT category, confidence, risk_level
+      FROM live_lookup
+      WHERE number_e164 = ?1
+      LIMIT 1
+    `)
+      .bind(normalizedNumber)
+      .first()
+
+    if (!row) return { score: 0, reasons: [] }
+
+    const category = canonicalCategory(row.category)
+    const riskLevel = Number(row.risk_level || 0)
+    const confidence = Number(row.confidence || 0)
+    const hasUsableConfidence = confidence <= 0 || confidence >= 0.7
+
+    if (category === "fraud" && riskLevel >= 70 && hasUsableConfidence) {
+      return { score: 35, reasons: ["KNOWN_FRAUD_NUMBER"] }
+    }
+
+    if (category === "spam" && riskLevel >= 60 && hasUsableConfidence) {
+      return { score: 35, reasons: ["KNOWN_SPAM_NUMBER"] }
+    }
+
+    if (category === "telemarketing" && riskLevel >= 60 && hasUsableConfidence) {
+      return { score: 35, reasons: ["TELEMARKETING_PATTERN"] }
+    }
+
+    return { score: 0, reasons: [] }
+  } catch (error) {
+    console.error("live_lookup_number_signal_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
 async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
   const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))].slice(0, 10)
   if (!env?.DB || normalizedDomains.length === 0) {
@@ -2571,8 +2613,40 @@ async function buildFinalAnalysis(env, {
       : 69
   }
 
-  if (hasKnownFraud || hasGlobalScam) {
+  const knownFraudCompanionRisk =
+    reason_codes.some((code) => [
+      "OTP_SCAM",
+      "IP_URL",
+      "BRAND_SPOOF",
+      "KNOWN_MALICIOUS_DOMAIN",
+      "RISKY_TLD",
+      "SUSPICIOUS_DOMAIN",
+      "STRONG_CORRELATED_SCAM",
+      "FAKE_TRACKING_LINK",
+      "PAYMENT_PRESSURE",
+      "ACCOUNT_THREAT",
+      "PHISHING_INTENT",
+      "FAKE_AUTHORITY",
+      "DELIVERY_SCAM",
+      "JOB_SCAM",
+      "KNOWN_BAD_ACTOR",
+      "USER_CONFIRMED_SCAM",
+      "BAD_REPUTATION",
+      "HIGH_THREAT_GRAPH",
+      "MULTI_NUMBER_CAMPAIGN",
+    ].includes(code))
+
+  const weakKnownFraudNumberSignal =
+    hasKnownFraud &&
+    !hasGlobalScam &&
+    aiScore === null &&
+    heuristicScore <= 55 &&
+    !knownFraudCompanionRisk
+
+  if (hasGlobalScam || (hasKnownFraud && !weakKnownFraudNumberSignal)) {
     finalScore = Math.max(finalScore, 90)
+  } else if (weakKnownFraudNumberSignal) {
+    finalScore = Math.max(finalScore, 35)
   }
 
   const hasTelemarketingSignals =
@@ -3950,6 +4024,13 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const earlyBusinessReputation = shouldLookupBusinessReputationEarly
     ? await analyzeBusinessReputationSignals(env, baseDomains, number, message)
     : { score: 0, reasons: [] }
+  const shouldLookupLiveNumberEarly = Boolean(number)
+  if (shouldLookupLiveNumberEarly) {
+    d1ReadsEstimate += 1
+  }
+  const earlyLiveNumber = shouldLookupLiveNumberEarly
+    ? await analyzeLiveLookupNumberSignals(env, number)
+    : { score: 0, reasons: [] }
   const shouldLookupFeedbackNumberEarly = Boolean(number) && !trustedTransactional
   if (shouldLookupFeedbackNumberEarly) {
     d1ReadsEstimate += 1
@@ -3959,13 +4040,17 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     : { score: 0, reasons: [] }
   const earlyFeedbackNumber = suppressSafeFeedbackEntityForCriticalReasons(
     rawEarlyFeedbackNumber,
-    baseHeuristicWithReputation.reasonCodes
+    uniqueReasonCodes([
+      ...baseHeuristicWithReputation.reasonCodes,
+      ...earlyLiveNumber.reasons,
+    ])
   )
   const baseHeuristicWithEarlyReputation = {
-    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score + earlyFeedbackNumber.score),
+    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score + earlyLiveNumber.score + earlyFeedbackNumber.score),
     reasonCodes: uniqueReasonCodes([
       ...baseHeuristicWithReputation.reasonCodes,
       ...earlyBusinessReputation.reasons,
+      ...earlyLiveNumber.reasons,
       ...earlyFeedbackNumber.reasons,
     ]),
   }
@@ -3978,14 +4063,16 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     !baseHasIdentity &&
     !baseHasAccountThreat &&
     (baseDomainsTrusted || !baseSpoof) &&
+    !baseHeuristicWithEarlyReputation.reasonCodes.includes("KNOWN_FRAUD_NUMBER") &&
     baseHeuristicWithEarlyReputation.score <= 80
 
   if (clearTelemarketingFastPath) {
-    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score + earlyFeedbackNumber.score)
+    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score + earlyLiveNumber.score + earlyFeedbackNumber.score)
     const telemarketingReasons = uniqueReasonCodes([
       ...baseHeuristic.reasonCodes,
       ...baseDomainReputation.reasons,
       ...earlyBusinessReputation.reasons,
+      ...earlyLiveNumber.reasons,
       ...earlyFeedbackNumber.reasons,
       "TELEMARKETING_PATTERN",
     ])
@@ -4061,6 +4148,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseHasIdentity ||
     baseHasTelemarketing ||
     earlyBusinessReputation.score > 0 ||
+    earlyLiveNumber.score > 0 ||
     earlyFeedbackNumber.score > 0
 
   const localFrequencyReadsEstimate = trustedTransactional || !suspiciousCore
