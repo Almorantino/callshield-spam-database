@@ -1336,6 +1336,137 @@ test("business reputation low-confidence endpoint stays neutral", async () => {
   assert.equal(decisionOf(result.payload).action, "warn")
 })
 
+test("number feedback spam and telemarketing prevents fast allow", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 2,
+        telemarketing_count: 1,
+        safe_count: 0,
+        source_count: 3,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "33677777777",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("KNOWN_SPAM_NUMBER"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+  assert.ok(env.__db.statements.some((sql) => sql.includes("FROM feedback_entity_aggregates")))
+})
+
+test("number feedback fraud x2 prevents fast allow", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 2,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "33677777778",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("USER_CONFIRMED_SCAM"))
+  assert.equal(decisionOf(result.payload).action, "warn")
+  assert.notEqual(decisionOf(result.payload).action, "block")
+})
+
+test("number feedback safe x2 can keep benign SMS allowed", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 0,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 2,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    number: "33677777779",
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(reasonsOf(result.payload).includes("USER_CONFIRMED_SAFE"))
+  assert.equal(decisionOf(result.payload).action, "allow")
+})
+
+test("number feedback single fraud signal is neutral", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 1,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        source_count: 1,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await context.analyzeFeedbackNumberSignals(env, "33677777780")
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("number feedback conflicting signals are neutral", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 2,
+        spam_count: 1,
+        telemarketing_count: 0,
+        safe_count: 2,
+        source_count: 4,
+        controversy_score: 1,
+      },
+    ],
+  })
+  const result = await context.analyzeFeedbackNumberSignals(env, "33677777781")
+
+  assert.equal(result.score, 0)
+  assert.deepEqual(Array.from(result.reasons), [])
+})
+
+test("SMS analysis without number does not read number feedback aggregate", async () => {
+  const env = makeEnv({
+    feedbackEntityAggregateRows: [
+      {
+        fraud_count: 2,
+        spam_count: 0,
+        telemarketing_count: 0,
+        safe_count: 0,
+        source_count: 2,
+        controversy_score: 0,
+      },
+    ],
+  })
+  const result = await postJson(context, env, "/ai/sms/analyze", {
+    message: "Bonjour, votre rendez-vous est confirme demain.",
+  })
+
+  assert.equal(result.status, 200)
+  assert.ok(!env.__db.statements.some((sql) => sql.includes("FROM feedback_entity_aggregates")))
+})
+
 test("frequency counters preserve derived campaign and local graph scoring", async () => {
   const spread = context.campaignPatternFromDistinctNumbers(11)
   assert.equal(spread.score, 25)

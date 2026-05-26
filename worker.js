@@ -1127,6 +1127,65 @@ async function analyzeFeedbackEntitySignals(env, domains = []) {
   }
 }
 
+async function analyzeFeedbackNumberSignals(env, number = "") {
+  const normalizedNumber = normalizeNumber(number)
+  if (!env?.DB || !normalizedNumber) {
+    return { score: 0, reasons: [] }
+  }
+
+  try {
+    const rows = await env.DB.prepare(`
+      SELECT
+        fraud_count,
+        spam_count,
+        telemarketing_count,
+        safe_count,
+        source_count,
+        controversy_score
+      FROM feedback_entity_aggregates
+      WHERE entity_type = 'number'
+        AND entity_value = ?1
+    `)
+      .bind(normalizedNumber)
+      .all()
+
+    const results = Array.isArray(rows?.results) ? rows.results : []
+    let fraudCount = 0
+    let spamCount = 0
+    let telemarketingCount = 0
+    let safeCount = 0
+    let sourceCount = 0
+    let controversyScore = 0
+
+    for (const row of results) {
+      fraudCount = Math.max(fraudCount, Number(row?.fraud_count || 0))
+      spamCount = Math.max(spamCount, Number(row?.spam_count || 0))
+      telemarketingCount = Math.max(telemarketingCount, Number(row?.telemarketing_count || 0))
+      safeCount = Math.max(safeCount, Number(row?.safe_count || 0))
+      sourceCount = Math.max(sourceCount, Number(row?.source_count || 0))
+      controversyScore = Math.max(controversyScore, Number(row?.controversy_score || 0))
+    }
+
+    const positiveCount = fraudCount + spamCount + telemarketingCount
+    if (fraudCount >= 2 && safeCount === 0 && controversyScore === 0) {
+      return { score: 20, reasons: ["USER_CONFIRMED_SCAM"] }
+    }
+
+    if (spamCount + telemarketingCount >= 3 && safeCount === 0 && controversyScore === 0) {
+      return { score: 15, reasons: ["KNOWN_SPAM_NUMBER"] }
+    }
+
+    if (safeCount >= 2 && positiveCount === 0 && sourceCount >= 2) {
+      return { score: -25, reasons: ["USER_CONFIRMED_SAFE"] }
+    }
+
+    return { score: 0, reasons: [] }
+  } catch (error) {
+    console.error("feedback_number_aggregate_lookup_failed", error)
+    return { score: 0, reasons: [] }
+  }
+}
+
 async function analyzeExternalUrlEvidenceSignals(env, domains = []) {
   const normalizedDomains = [...new Set((domains || []).map(normalizeDomainValue).filter(Boolean))].slice(0, 10)
   if (!env?.DB || normalizedDomains.length === 0) {
@@ -1442,7 +1501,9 @@ function requiresAIReviewForLowScore(message, reasonCodes = []) {
       "PHISHING_INTENT",
       "FAKE_AUTHORITY",
       "JOB_SCAM",
+      "KNOWN_SPAM_NUMBER",
       "KNOWN_BAD_ACTOR",
+      "USER_CONFIRMED_SCAM",
     ].includes(code))
 }
 
@@ -3889,11 +3950,23 @@ async function handleSMSAnalyze(env, body, ctx = null) {
   const earlyBusinessReputation = shouldLookupBusinessReputationEarly
     ? await analyzeBusinessReputationSignals(env, baseDomains, number, message)
     : { score: 0, reasons: [] }
-  const baseHeuristicWithBusinessReputation = {
-    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score),
+  const shouldLookupFeedbackNumberEarly = Boolean(number) && !trustedTransactional
+  if (shouldLookupFeedbackNumberEarly) {
+    d1ReadsEstimate += 1
+  }
+  const rawEarlyFeedbackNumber = shouldLookupFeedbackNumberEarly
+    ? await analyzeFeedbackNumberSignals(env, number)
+    : { score: 0, reasons: [] }
+  const earlyFeedbackNumber = suppressSafeFeedbackEntityForCriticalReasons(
+    rawEarlyFeedbackNumber,
+    baseHeuristicWithReputation.reasonCodes
+  )
+  const baseHeuristicWithEarlyReputation = {
+    score: clampScore(baseHeuristicWithReputation.score + earlyBusinessReputation.score + earlyFeedbackNumber.score),
     reasonCodes: uniqueReasonCodes([
       ...baseHeuristicWithReputation.reasonCodes,
       ...earlyBusinessReputation.reasons,
+      ...earlyFeedbackNumber.reasons,
     ]),
   }
 
@@ -3905,14 +3978,15 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     !baseHasIdentity &&
     !baseHasAccountThreat &&
     (baseDomainsTrusted || !baseSpoof) &&
-    baseHeuristicWithBusinessReputation.score <= 80
+    baseHeuristicWithEarlyReputation.score <= 80
 
   if (clearTelemarketingFastPath) {
-    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score)
+    const telemarketingHeuristicScore = clampScore(45 + earlyBusinessReputation.score + earlyFeedbackNumber.score)
     const telemarketingReasons = uniqueReasonCodes([
       ...baseHeuristic.reasonCodes,
       ...baseDomainReputation.reasons,
       ...earlyBusinessReputation.reasons,
+      ...earlyFeedbackNumber.reasons,
       "TELEMARKETING_PATTERN",
     ])
 
@@ -3986,7 +4060,8 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     baseHasSuspiciousPattern ||
     baseHasIdentity ||
     baseHasTelemarketing ||
-    earlyBusinessReputation.score > 0
+    earlyBusinessReputation.score > 0 ||
+    earlyFeedbackNumber.score > 0
 
   const localFrequencyReadsEstimate = trustedTransactional || !suspiciousCore
     ? 0
@@ -3998,7 +4073,7 @@ async function handleSMSAnalyze(env, body, ctx = null) {
     : await analyzeLocalFrequencySignals(env, number, normalizedMessage)
   const shouldCheckGlobalThreatGraph = Boolean(number || suspiciousCore)
 
-  const fastDecision = await fastHeuristicDecision(env, message, baseHeuristicWithBusinessReputation, baseDomains, baseTrustContext)
+  const fastDecision = await fastHeuristicDecision(env, message, baseHeuristicWithEarlyReputation, baseDomains, baseTrustContext)
 
   if (fastDecision.matched) {
     const rawResult = await buildFinalAnalysis(env, {
